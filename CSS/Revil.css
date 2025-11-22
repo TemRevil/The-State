@@ -1,0 +1,162 @@
+/* ------------------------------------- */
+/*         Revil Core - v.1.2           */
+/* ------------------------------------- */
+
+/* ------------------------------------- */
+/* 0. Root Colors & Fonts               */
+/* ------------------------------------- */
+:root {
+  /* == Custom Color Palettes == */
+  /* Color, Hoverd, Lighted */
+  --fb: #c1121f;    --fbl: #f2b1b5;    --fblt: #f8d2d6;
+  --pw: #fdf0d5;    --pwh: #fff2df;    --pwl: #fff9f1;
+  --pb: #003049;    --pbh: #b7d0da;    --pbl: #d4e1e8;
+  --pc: #00b4d8;    --pch: #b5eafa;    --pcl: #d4f4fb;
+  --ow: #f77f00;    --owh: #ffe1b3;    --owl: #ffeed7;
+  --ob: #14213d;    --obh: #b8c2d1;    --obl: #d6dae0;
+  --vg: #5bc0be;    --vgh: #bbebea;    --vgl: #d8f4f3;
+  --kg: #29bf12;    --kgh: #c0f5c5;    --kgl: #d7fadb;
+  --gy: #abff4f;    --gyh: #e6ffca;    --gyl: #f4ffe5;
+
+  /* dark-mode background tuned for subtle moving blobs */
+  --bg-primary: #0b1020; /* deep blue-gray */
+  --blacks: #0b111d;
+  --whites: #f8f9fa;
+  --blur: #00000040;
+	--ag-blur: #ffffff59;
+  --fill-blur: blur(12px);
+
+  --blue-1: #0077b6;  --blue-2: #00b4d8;  --blue-3: #48cae4;
+  --blue-4: #90e0ef;  --blue-5: #caf0f8;
+
+  --green-1: #036d19; --green-2: #14cc60; --green-3: #57cc99;
+  --green-4: #80ed99; --green-5: #c7f9cc;
+}
+
+/* ------------------------------------- */
+/* 1. Base Reset                        */
+/* ------------------------------------- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html, body {
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+/* ------------------------------------- */
+/* 2. Flex and Grid Layouts             */
+/* ------------------------------------- */
+.off { display: none !important;}                   /* .off → display: none */
+
+.flex { display: flex; }                           /* .flex → display: flex */
+.row  { flex-direction: row; }
+.col  { flex-direction: column; }
+.wrap { flex-wrap: wrap; }
+.grid { display: grid; }
+
+/* == Alignment == */
+.center    { align-items: center; justify-content: center; }
+.a-center  { align-items: center; }
+.a-start   { align-items: flex-start; }
+.a-end     { align-items: flex-end; }
+.j-center  { justify-content: center; }
+.j-start    { justify-content: flex-start; }
+.j-end      { justify-content: flex-end; }
+.j-between  { justify-content: space-between; }
+.j-around   { justify-content: space-around; }
+.j-evenly   { justify-content: space-evenly; }
+
+/* ------------------------------------- */
+/* 3. Width, Height Utilities           */
+/* ------------------------------------- */
+.w-a { width: auto; }                      /* .w-a → width: auto */
+.h-a { height: auto; }
+
+/* == Dynamic Width & Height (RevilDynamicCSS) == */
+/*
+  w-[200px]       → width: 200px
+  h-[50vh]        → height: 50vh
+  wx-[90%]        → max-width: 90%
+  wn-[300px]      → min-width: 300px
+  hx-[80vh]       → max-height: 80vh
+  hn-[50px]       → min-height: 50px
+*/
+
+/* ------------------------------------- */
+/* 4. Spacing, Border, Radius           */
+/* ------------------------------------- */
+/*
+  mg-a              → margin: auto
+  pd-a              → padding: auto
+  mg-[10px_20px]    → margin: 10px 20px
+  pd-[5px_10px]     → padding: 5px 10px
+  bd-[1px_solid_red]→ border: 1px solid red
+  rd-[12px]         → border-radius: 12px
+*/
+
+/* ------------------------------------- */
+/* 5. Colors & Visuals                  */
+/*
+  cl-[#fff]       → color: #fff
+  cl-[var(--fb)]  → color: var(--fb)
+  bc-[red]        → background-color: red
+  bc-[var(--pw)]  → background-color: var(--pw)
+  op-[0.5]        → opacity: 0.5
+*/
+
+.hr-h {
+  border: 3px var(--blur) solid;
+}
+
+/* ------------------------------------- */
+/* 6. Typography                        */
+/* ------------------------------------- */
+.title {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 700;
+  font-size: 3.25rem;
+  color: var(--whites);
+  transition: 0.2s linear;
+}
+.align {
+  font-family: 'Tajawal', sans-serif;
+  font-weight: 400;
+  font-size: 2rem;
+  color: var(--whites);
+  transition: 0.2s linear;
+}
+.text, .text-1, .text-2 {
+  font-family: 'Cairo', sans-serif;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--whites);
+  transition: 0.2s linear;
+}
+.text   { font-size: 1.375rem; }
+.text-1 { font-size: 1rem; }
+.text-2 { font-size: 1.625rem; }
+
+.links {
+  text-decoration: none;
+  font-family: 'Cairo', sans-serif;
+  font-weight: 900;
+  font-size: 1.375rem;
+  color: var(--whites);
+  transition: 0.2s linear;
+}
+.links:hover {
+  text-decoration: solid;
+}
+.ag {
+  color: var(--whites);
+}
+hr {
+  margin: 5px 0px;
+  border: 2px solid var(--ag-blur);
+  border-radius: 999px;
+}
