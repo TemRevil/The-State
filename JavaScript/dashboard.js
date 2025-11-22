@@ -2,34 +2,10 @@ import { getFirestore, doc, getDoc, getDocs, collection, setDoc, updateDoc, onSn
 import {
   getStorage, ref, listAll, getDownloadURL, deleteObject, uploadBytes
 } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-storage.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js"; // Added import
 
 const db = getFirestore();
-
-(async () => {
-    const storedPassword = localStorage.getItem("STP");
-    if (!storedPassword) {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    try {
-        const adminDoc = await getDoc(doc(db, "Dashboard", "Admin"));
-        if (adminDoc.exists()) {
-            const correctPassword = adminDoc.data().Password;
-            if (storedPassword !== correctPassword) {
-                localStorage.removeItem("STP");
-                window.location.href = 'index.html';
-            }
-        } else {
-            localStorage.removeItem("STP");
-            window.location.href = 'index.html';
-        }
-    } catch (error) {
-        console.error("Security check failed:", error);
-        localStorage.removeItem("STP");
-        window.location.href = 'index.html';
-    }
-})();
+const auth = getAuth(); // Initialize Auth
 
 const storage = getStorage();
 // =====================================
@@ -758,7 +734,23 @@ function createElement(tag, classes = [], attributes = {}, children = []) {
 // =====================================
 // 7. STARTUP
 // =====================================
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Firebase Auth State Listener
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      // User is signed in, proceed with dashboard initialization
+      if(db) initDashboard();
+      console.log("User is signed in:", user.uid);
+      // You might want to store the UID globally or in state if needed elsewhere
+      state.currentUserUid = user.uid; 
+    } else {
+      // No user is signed in, redirect to login page
+      console.log("No user signed in, redirecting to index.html");
+      window.location.href = 'index.html';
+    }
+  });
+
   // Tab Listeners
   document.querySelectorAll('.tab-btn').forEach(tab => {
     tab.onclick = () => {
@@ -791,8 +783,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('logout-btn').onclick = () => {
     if(confirm("Logout?")) {
-      localStorage.removeItem("STP");
-      window.location.href = 'index.html';
+      signOut(auth).then(() => {
+        localStorage.removeItem("STP"); // Remove any legacy token
+        window.location.href = 'index.html';
+      }).catch((error) => {
+        console.error("Error signing out:", error);
+        alert("Failed to logout. Please try again.");
+      });
     }
   };
 
@@ -825,8 +822,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderNumbersTable();
   });
 
-  // Boot
-  if(db) initDashboard();
+  // Boot (removed from here, now handled by onAuthStateChanged)
 
   // Set initial view buttons
   if (state.currentView === 'grid') {
@@ -848,6 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
 
 // Export functions for external use
 

@@ -390,12 +390,11 @@
   box-shadow: 0 2px 8px rgba(193, 18, 31, 0.3);
 }
 
-/* Dropdown Menu - iOS 18+ Liquid Glass Style */
 .options-dropdown {
   position: fixed;
   min-width: 220px;
   max-width: 220px;
-  background: rgba(28, 28, 30, 0.78);
+  background: var(--blur);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
   border: 0.5px solid rgba(255, 255, 255, 0.18);

@@ -7,9 +7,7 @@ yarn-error.log*
 .pnpm-store/
 
 # Firebase configuration and API keys
-# Assuming firebase.js contains sensitive data or configuration
 # If there are other files with API keys or sensitive data, add them here.
-JavaScript/firebase.js
 
 # Environment variables
 .env

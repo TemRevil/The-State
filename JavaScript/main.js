@@ -1,4 +1,6 @@
 import { getDoc, doc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+
 // Prevent right-click context menu globally
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -7,6 +9,9 @@ const isArabic = (text) => {
   const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
   return arabicRegex.test(text);
 };
+
+// Initialize Firebase Auth
+const auth = getAuth(); // Initialize Auth
 
 // =====================================
 // Permissions System - Class-based
@@ -480,22 +485,19 @@ class UserBoxController {
         return alert('Please enter a password.');
       }
       try {
-        const adminDoc = await getDoc(doc(window.db, "Dashboard", "Admin"));
-        if (adminDoc.exists()) {
-          const correctPassword = adminDoc.data().Password;
-          if (password === correctPassword) {
-            alert('Access granted! Redirecting to dashboard...');
-            localStorage.setItem("STP", password); // Store password
-            window.location.href = 'dashboard.html'; // Redirect
-          } else {
-            alert('Incorrect password');
-          }
-        } else {
-          alert('Error: Admin configuration not found.');
-        }
+        await signInWithEmailAndPassword(auth, "temrevil@gmail.com", password);
+        alert('Access granted! Redirecting to dashboard...');
+        // No need to store password in localStorage if using Firebase Auth
+        window.location.href = 'dashboard.html'; // Redirect
       } catch (error) {
-        console.error("Error checking dashboard password:", error);
-        alert('An error occurred. Please try again.');
+        console.error("Error logging in to dashboard:", error);
+        let errorMessage = 'An error occurred. Please try again.';
+        if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+          errorMessage = 'Invalid email or password.';
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage = 'Too many failed login attempts. Please try again later.';
+        }
+        alert(errorMessage);
       }
     });
 
