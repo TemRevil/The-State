@@ -699,6 +699,14 @@ class ClipboardMonitor {
         this.checkClipboard();
       }
     });
+
+    // Check when tab becomes visible again (useful for mobile screenshots)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.isMonitoring) {
+        // A small delay can help ensure the clipboard has been updated
+        setTimeout(() => this.checkClipboard(), 200);
+      }
+    });
   }
 
   stop() {
