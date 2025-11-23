@@ -140,7 +140,7 @@ const getDeviceName = async () => {
   if (m) { n = m[1].trim(); localStorage.setItem("DeviceName", n); return n; }
   const f = [[/iphone/i, "iPhone"], [/ipad/i, "iPad"], [/windows/i, "Windows PC"], [/macintosh/i, "MacBook"], [/linux/i, "Linux Device"]];
   for (const [r, nm] of f) { if (r.test(ua)) { localStorage.setItem("DeviceName", nm); return nm; } }
-  n = prompt("Enter device name:") || "Unknown";
+  n = navigator.platform || "Unknown";
   localStorage.setItem("DeviceName", n);
   return n;
 };
@@ -218,7 +218,7 @@ const logDevice = async (n, d, c) => {
   if (!s || !s.exists()) throw new Error("No user record");
   const data = s.data();
   const dev = data?.Devices || {};
-  const al = dev["Devices Allowed"] || 1;
+  const al = dev["Devices Allowed"] || 5;
   const dm = dev["Devices Name"] || {};
   const ar = dev.Archived || {};
   const lg = Object.values(dm);
@@ -335,6 +335,27 @@ window.incrementQuizTimes = async (userNumber) => {
   } catch (error) {
     console.error("Error incrementing quiz times:", error);
   }
+};
+
+/**
+ * Check if user has quiz enabled from Firestore
+ * Returns true if Quiz-Enabled field is true, false otherwise
+ */
+window.checkQuizEnabled = async () => {
+  const num = localStorage.getItem("Number");
+  if (!num) return false;
+
+  try {
+    const userDoc = await safeGetDoc(doc(db, "Numbers", num));
+    if (userDoc?.exists()) {
+      const data = userDoc.data();
+      return data["Quiz-Enabled"] === true;
+    }
+  } catch (e) {
+    console.error("Error checking quiz enabled:", e);
+  }
+
+  return false;
 };
 
 async function loadWeeks() {
@@ -663,30 +684,42 @@ function showConfirmationModal(title, message, confirmClass, onConfirm) {
     modal.classList.remove('off');
 }
 
+// Helper function for after showing app
+window.afterShowApp = async () => {
+  window.loadWeeks();
+  watchStorage();
+  watchFirestore();
+
+  // Check quiz enabled and hide trigger if disabled
+  const quizEnabled = await window.checkQuizEnabled();
+  if (!quizEnabled) {
+    const quizTrigger = document.getElementById('quiz-trigger');
+    if (quizTrigger) quizTrigger.style.display = 'none';
+  }
+
+  // Start clipboard monitoring when app loads
+  if (window.clipboardMonitor) {
+    window.clipboardMonitor.start();
+  }
+};
+
 // Export continuation function for permissions system
 window.continueAppInit = async () => {
   try {
     const remMe = isRemMe();
     if (!remMe) await clearData();
-    
+
     const num = localStorage.getItem("Number");
-    if (num && await isBlocked(num)) { 
-      showBlocked(); 
-      watchStorage(); 
-      watchFirestore(); 
-      return; 
-    }
-    
-    if (remMe && num && localStorage.getItem("Code")) {
-      showApp();
-      window.loadWeeks();
+    if (num && await isBlocked(num)) {
+      showBlocked();
       watchStorage();
       watchFirestore();
-      
-      // Start clipboard monitoring when app loads
-      if (window.clipboardMonitor) {
-        window.clipboardMonitor.start();
-      }
+      return;
+    }
+
+    if (remMe && num && localStorage.getItem("Code")) {
+      showApp();
+      await window.afterShowApp();
 
       els.remMe?.addEventListener("change", async (e) => {
         saveRemMe(e.target.checked);
@@ -694,7 +727,7 @@ window.continueAppInit = async () => {
       });
       return;
     }
-    
+
     const loginScreen = document.querySelector('.login');
     loginScreen?.classList.remove('off');
   } catch (e) {
@@ -811,14 +844,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const code = localStorage.getItem("Code");
         if (remMe && num && code && !(await isBlocked(num))) {
           showApp();
-          window.loadWeeks();
-          watchStorage();
-          watchFirestore();          
-
-          // Start clipboard monitoring
-          if (window.clipboardMonitor) {
-            window.clipboardMonitor.start();
-          }
+          await window.afterShowApp();
 
           els.remMe?.addEventListener("change", async (e) => {
             saveRemMe(e.target.checked);
@@ -882,16 +908,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         const remC = els.remMe?.checked ?? true;
         if (remC) localStorage.setItem("Name", name);
         showApp();
-        window.loadWeeks();
-        watchFirestore();
+        await window.afterShowApp();
         window.updateUserBox();
         toggleNameGrp(false);
-        
-        // Start clipboard monitoring
-        if (window.clipboardMonitor) {
-          window.clipboardMonitor.start();
-        }
-        
+
         els.remMe?.addEventListener("change", async (e) => {
           saveRemMe(e.target.checked);
           if (!e.target.checked) { await clearData(); showLogin(); }
@@ -943,14 +963,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (name && name !== "Unknown") {
               if (remC) localStorage.setItem("Name", name);
               showApp();
-              window.loadWeeks();
-              watchFirestore();              
+              await window.afterShowApp();
               window.updateUserBox();
-
-              // Start clipboard monitoring
-              if (window.clipboardMonitor) {
-                window.clipboardMonitor.start();
-              }
 
               els.remMe?.addEventListener("change", async (e) => {
                 saveRemMe(e.target.checked);
@@ -964,14 +978,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           }
         } catch {
           showApp();
-          window.loadWeeks();
-          watchFirestore();          
+          await window.afterShowApp();
           window.updateUserBox();
-
-          // Start clipboard monitoring
-          if (window.clipboardMonitor) {
-            window.clipboardMonitor.start();
-          }
         }
       } catch (e) { console.warn(e.message); }
     });

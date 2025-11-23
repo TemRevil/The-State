@@ -10,9 +10,6 @@ const isArabic = (text) => {
   return arabicRegex.test(text);
 };
 
-// Initialize Firebase Auth
-const auth = getAuth(); // Initialize Auth
-
 // =====================================
 // Permissions System - Class-based
 // =====================================
@@ -485,7 +482,7 @@ class UserBoxController {
         return alert('Please enter a password.');
       }
       try {
-        await signInWithEmailAndPassword(auth, "temrevil@gmail.com", password);
+        await signInWithEmailAndPassword(auth, "temrevil+1@gmail.com", password);
         alert('Access granted! Redirecting to dashboard...');
         // No need to store password in localStorage if using Firebase Auth
         window.location.href = 'dashboard.html'; // Redirect
@@ -519,8 +516,21 @@ class UserBoxController {
 // Initialize
 let userBoxInstance;
 
-const initApp = () => {
+const auth = getAuth();
+
+const initApp = async () => {
   userBoxInstance = new UserBoxController();
+  // Auto sign in with a fixed account for backend access
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, "temrevil@gmail.com", "1q2w3e");
+    console.log("Auto signed in to Firebase Auth:", userCredential.user.uid);
+  } catch (error) {
+    // This can fail if the user is already signed in, which is fine.
+    // We log other errors for debugging.
+    if (error.code !== 'auth/operation-not-allowed') { // operation-not-allowed can happen with multiple sign-in attempts
+        console.warn("Auto sign-in may have been handled already or failed:", error.message);
+    }
+  }
 };
 
 if (document.readyState === "loading") {
@@ -714,708 +724,332 @@ document.addEventListener('DOMContentLoaded', () => {
 // =====================================
 // Quiz System - Refactored & Optimized
 // =====================================
-class QuizSystem {
-    constructor(element) {
-        if (!element) throw new Error('Quiz element required');
-        
-        this.quiz = element;
-        this.elements = this.cacheElements();
-        
+class QuiziApp {
+    constructor() {
+        this.dom = {
+            trigger: document.getElementById('quiz-trigger'),
+            modal: document.getElementById('quiz-modal'),
+            closeBtn: document.getElementById('close-quiz'),
+            title: document.getElementById('quiz-title'),
+            
+            views: {
+                setup: document.getElementById('view-setup'),
+                active: document.getElementById('view-active'),
+                result: document.getElementById('view-result')
+            },
+
+            tabsContainer: document.getElementById('subject-tabs'),
+            pdfList: document.getElementById('pdf-list'),
+            inputs: {
+                count: document.getElementById('inp-count'),
+                timer: document.getElementById('inp-timer'),
+                choices: document.getElementById('inp-choices')
+            },
+            labels: {
+                count: document.getElementById('lbl-count'),
+                timer: document.getElementById('lbl-timer'),
+                choices: document.getElementById('lbl-choices')
+            },
+            startBtn: document.getElementById('btn-start'),
+
+            game: {
+                timer: document.getElementById('quiz-timer'),
+                curr: document.getElementById('q-curr'),
+                total: document.getElementById('q-total'),
+                text: document.getElementById('q-text'),
+                choices: document.getElementById('choices-area'),
+                prev: document.getElementById('btn-prev'),
+                next: document.getElementById('btn-next')
+            },
+
+            result: {
+                circle: document.getElementById('score-circle'),
+                val: document.getElementById('score-val'),
+                list: document.getElementById('review-list'),
+                restart: document.getElementById('btn-restart')
+            }
+        };
+
         this.state = {
-            currentIndex: 0,
+            settings: { count: 10, timer: 5, choices: 4 },
             quizData: [],
             userAnswers: [],
-            correctCount: 0,
-            timer: null,
-            timeRemaining: 0,
-            settings: { timer: 0, questions: 0, choices: 0 }
+            currIndex: 0,
+            timerInterval: null,
+            timeRemaining: 0
         };
-        
+
         this.init();
     }
 
-    cacheElements() {
-        const querySelector = (sel) => this.quiz.querySelector(sel);
-        const querySelectorAll = (sel) => this.quiz.querySelectorAll(sel);
-        
-        return {
-            icon: querySelector('img[alt="Quiz"]'),
-            options: querySelector('.quizi-opt'),
-            content: querySelector('.quiz-content'),
-            startBtn: querySelector('.sq-btn'),
-            timerDisplay: querySelector('#qi-timer'),
-            timerInput: document.getElementById('q-timer'),
-            quizInput: document.getElementById('q-quiz'),
-            choicesInput: document.getElementById('q-choices'),
-            questionArea: querySelector('.quiz-question'),
-            navigation: querySelector('.quiz-navigation'),
-            prevBtn: querySelector('.prev-question'),
-            nextBtn: querySelector('.next-question'),
-            resultArea: querySelector('.DNF'),
-            resultScore: querySelector('#q-result'),
-            resultSection: querySelector('.result-sect'),
-            closeBtns: querySelectorAll('.close-btn, .close-btn-2')
-        };
+    // --- HELPER: Detect Text Direction ---
+    getDirection(text) {
+        if (!text) return 'rtl';
+        const arabicPattern = /[\u0600-\u06FF]/;
+        return arabicPattern.test(text) ? 'rtl' : 'ltr';
     }
 
     init() {
-        this.setupInputs();
-        this.attachEvents();
-        this.originalTimerText = this.elements.timerDisplay?.textContent || 'Quiz';
-    }
+        this.dom.trigger.addEventListener('click', () => {
+            this.dom.modal.classList.remove('off');
+            this.renderSubjects();
+        });
+        this.dom.closeBtn.addEventListener('click', () => {
+            this.dom.modal.classList.add('off');
+            this.reset();
+        });
 
-    setupInputs() {
-        [this.elements.timerInput, this.elements.quizInput, this.elements.choicesInput].forEach(input => {
-            if (!input) return;
-            const [min, max] = (input.getAttribute('mm') || '0,100').split(',').map(Number);
-            
-            input.addEventListener('input', e => {
-                e.target.value = e.target.value.replace(/\D/g, '');
-                const val = parseInt(e.target.value) || 0;
-                if (val && val < min) e.target.value = min;
-                if (val && val > max) e.target.value = max;
-            });
-            
-            input.addEventListener('blur', e => {
-                const val = parseInt(e.target.value) || min;
-                e.target.value = Math.max(min, Math.min(max, val));
+        Object.keys(this.dom.inputs).forEach(key => {
+            const input = this.dom.inputs[key];
+            const label = this.dom.labels[key];
+            input.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                this.state.settings[key] = val;
+                label.textContent = val + (key === 'timer' ? 'د' : '');
             });
         });
+
+        this.dom.startBtn.addEventListener('click', () => this.startQuiz());
+        this.dom.game.next.addEventListener('click', () => this.navigate(1));
+        this.dom.game.prev.addEventListener('click', () => this.navigate(-1));
+        this.dom.result.restart.addEventListener('click', () => this.switchView('setup'));
     }
 
-    attachEvents() {
-        this.quiz.addEventListener('click', () => this.openQuiz());
-        this.elements.startBtn?.addEventListener('click', e => this.startQuiz(e));
-        this.elements.prevBtn?.addEventListener('click', e => this.handlePrevious(e));
-        this.elements.nextBtn?.addEventListener('click', e => this.handleNext(e));
-        this.elements.closeBtns.forEach(btn => btn.addEventListener('click', e => this.closeQuiz(e)));
-        this.setupResultSection();
+    switchView(viewName) {
+        Object.values(this.dom.views).forEach(el => el.classList.add('off'));
+        this.dom.views[viewName].classList.remove('off');
+        const titles = { setup: 'إعدادات الكويز', active: 'الاختبار', result: 'النتيجة' };
+        this.dom.title.textContent = titles[viewName];
     }
 
-    setupResultSection() {
-        const rs = this.elements.resultSection;
-        if (!rs) return;
-        
-        const icon = rs.querySelector('img[alt="Results"]');
-        const align = rs.querySelector('p.align');
-        let container = rs.querySelector('.flex.col[style*="gap: 10px"]');
-        if (!container) container = rs.querySelector('.w-\\[100\\%\\].flex.col.gap-\\[10px\\]');
-        
-        rs.addEventListener('click', e => {
-            if (!rs.classList.contains('r-opened')) {
-                e.stopPropagation();
-                rs.classList.add('r-opened');
-                icon?.classList.add('off');
-                align?.classList.remove('off');
-                container?.classList.remove('off');
-                this.elements.resultArea?.classList.add('off');
-            }
+    renderSubjects() {
+        if (!window.pdfCache) return;
+        const subjects = new Set();
+        Object.values(window.pdfCache).flat().forEach(pdf => {
+            const name = pdf.name.split('-')[0].trim();
+            subjects.add(name);
         });
-        
-        document.addEventListener('click', e => {
-            if (!rs.contains(e.target) && rs.classList.contains('r-opened')) {
-                rs.classList.remove('r-opened');
-                icon?.classList.remove('off');
-                align?.classList.add('off');
-                container?.classList.add('off');
-                this.elements.resultArea?.classList.remove('off');
-            }
+
+        this.dom.tabsContainer.innerHTML = '';
+        let first = true;
+        subjects.forEach(sub => {
+            const btn = document.createElement('button');
+            btn.className = `tab-btn text-1 ${first ? 'active' : ''}`;
+            btn.textContent = sub;
+            btn.onclick = () => {
+                this.dom.tabsContainer.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.renderPDFs(sub);
+            };
+            this.dom.tabsContainer.appendChild(btn);
+            if(first) { this.renderPDFs(sub); first = false; }
         });
     }
 
-    showResultSection() {
-        const rs = this.elements.resultSection;
-        if (!rs) return;
-        
-        rs.classList.remove('off');
-        
-        const icon = rs.querySelector('img[alt="Results"]');
-        const align = rs.querySelector('p.align');
-        let container = rs.querySelector('.flex.col[style*="gap: 10px"]');
-        if (!container) container = rs.querySelector('.w-\\[100\\%\\].flex.col.gap-\\[10px\\]');
-        
-        rs.classList.remove('r-opened');
-        icon?.classList.remove('off');
-        align?.classList.add('off');
-        container?.classList.add('off');
-        
-        this.populateResults();
+    renderPDFs(subjectName) {
+        const container = this.dom.pdfList;
+        container.innerHTML = '';
+        const allPDFs = Object.values(window.pdfCache || {}).flat();
+        const matching = allPDFs.filter(pdf => pdf.name.includes(subjectName));
+
+        if (matching.length === 0) {
+            container.innerHTML = `<div class="empty-state text-1 op-[0.5] text-center mt-[20px]">لا توجد محاضرات</div>`;
+            return;
+        }
+
+        matching.forEach(pdf => {
+            const label = document.createElement('label');
+            label.className = 'pdf-item';
+            const displayName = pdf.name.replace('.pdf', '');
+            const dir = this.getDirection(displayName);
+
+            label.innerHTML = `
+                <input type="checkbox" class="accent-[var(--pc)]" data-name="${pdf.name}" data-lecture="${displayName}">
+                <span class="text-1 flex-1" style="direction:${dir}; text-align:${dir === 'rtl' ? 'right' : 'left'}">${displayName}</span>
+            `;
+            container.appendChild(label);
+        });
     }
 
-    openQuiz() {
-        if (this.quiz.classList.contains('q-opened')) return;
-        
-        this.elements.icon?.classList.add('off');
-        this.quiz.classList.add('q-opened');
-        this.elements.options?.classList.remove('off');
-        ['.close-btn', '#qi-timer', '.quiz-control'].forEach(sel => 
-            this.quiz.querySelector(sel)?.classList.remove('off')
-        );
-    }
+    async startQuiz() {
+        // Check if quiz is enabled
+        const quizEnabled = await window.checkQuizEnabled();
+        if (!quizEnabled) {
+            alert('Quizzes are not enabled for your account.');
+            return;
+        }
 
-    async startQuiz(e) {
-        e.stopPropagation();
-        
-        const settings = {
-            timer: parseInt(this.elements.timerInput?.value) || 0,
-            questions: parseInt(this.elements.quizInput?.value) || 0,
-            choices: parseInt(this.elements.choicesInput?.value) || 0
-        };
-        
-        if (!settings.timer || !settings.questions || !settings.choices) {
-            return alert('Please fill in all quiz settings!');
-        }
-        
-        const selectedPDFs = this.getSelectedPDFs();
-        if (!selectedPDFs.length) {
-            return alert('Please select at least one PDF from the quiz control!');
-        }
-        
-        const originalText = this.elements.startBtn.textContent;
-        this.elements.startBtn.textContent = 'Loading...';
-        this.elements.startBtn.disabled = true;
-        
+        const checked = this.dom.pdfList.querySelectorAll('input:checked');
+        if (checked.length === 0) return alert('يرجى اختيار محاضرة واحدة على الأقل');
+
+        const originalText = this.dom.startBtn.textContent;
+        this.dom.startBtn.textContent = 'جاري التحضير...';
+        this.dom.startBtn.disabled = true;
+
         try {
-            const quizData = await this.fetchQuizzesFromFirestore(selectedPDFs);
-            
-            if (!quizData.length) {
-                alert('No quiz questions found for selected PDFs!');
-                this.elements.startBtn.textContent = originalText;
-                this.elements.startBtn.disabled = false;
-                return;
-            }
-            
-            this.state.settings = settings;
-            this.state.userAnswers = [];
-            this.state.correctCount = 0;
-            this.state.currentIndex = 0;
-            this.state.quizData = quizData.slice(0, settings.questions);
-            
-            this.animateTimerText(`${settings.timer}:00`);
-            this.elements.content?.setAttribute('q-timer', settings.timer);
-            this.elements.content?.setAttribute('q-quiz', settings.questions);
-            this.elements.content?.setAttribute('q-choices', settings.choices);
-            
-            this.elements.startBtn.textContent = originalText;
-            this.elements.startBtn.disabled = false;
-            
-            this.elements.options?.classList.add('off');
-            setTimeout(() => {
-                this.elements.content?.classList.remove('off');
-                this.renderQuestion();
-                setTimeout(() => this.startTimer(), 1000);
-            }, 300);
+            const selectedPDFs = Array.from(checked).map(input => ({
+                fullName: input.dataset.name,
+                parts: input.dataset.lecture.split(' - ')
+            }));
 
-            // Increment quiz times for the user
-            this.incrementQuizTimes();
-            
+            const quizData = await this.fetchQuizzes(selectedPDFs);
+
+            if (!quizData || quizData.length === 0) throw new Error('لا توجد أسئلة');
+
+            this.state.quizData = quizData.slice(0, this.state.settings.count);
+            this.state.userAnswers = new Array(this.state.quizData.length).fill(null);
+            this.state.currIndex = 0;
+            this.state.timeRemaining = this.state.settings.timer * 60;
+
+            this.dom.startBtn.textContent = originalText;
+            this.dom.startBtn.disabled = false;
+            this.switchView('active');
+            this.renderQuestion();
+            this.startTimer();
+
+            const userNum = localStorage.getItem("Number");
+            if (userNum && window.incrementQuizTimes) window.incrementQuizTimes(userNum);
+
         } catch (error) {
-            console.error('Error fetching quizzes:', error);
-            alert('Error loading quizzes: ' + error.message);
-            this.elements.startBtn.textContent = originalText;
-            this.elements.startBtn.disabled = false;
+            alert(error.message);
+            this.dom.startBtn.textContent = originalText;
+            this.dom.startBtn.disabled = false;
         }
     }
-    
-    getSelectedPDFs() {
-        const quizControl = document.querySelector('.quiz-control');
-        if (!quizControl) return [];
-        
-        const checkedInputs = quizControl.querySelectorAll('.pdf-choice input[type="checkbox"]:checked');
-        const selected = [];
-        
-        checkedInputs.forEach(input => {
-            const choice = input.closest('.pdf-choice');
-            const pdfName = choice?.querySelector('.text-1')?.textContent.trim();
-            if (pdfName) {
-                const parts = pdfName.split(' - ');
-                if (parts.length === 2) {
-                    selected.push({
-                        lectureName: parts[0].trim(),
-                        lectureNumber: parts[1].trim(),
-                        fullName: pdfName
+
+    async fetchQuizzes(selectedPDFs) {
+        if (!window.getQuizDoc) throw new Error('Firestore Error');
+        let allQuizzes = [];
+        for (const pdf of selectedPDFs) {
+            const lectureName = pdf.parts[0]?.trim();
+            const lectureNum = pdf.parts[1]?.trim();
+            if (!lectureName || !lectureNum) continue;
+
+            const docSnap = await window.getQuizDoc(lectureName);
+            if (docSnap && docSnap.exists()) {
+                const data = docSnap.data();
+                const lectureData = data[lectureNum];
+                if (lectureData?.quiz) {
+                    lectureData.quiz.forEach(q => {
+                        if (q.question && q.choices) {
+                            allQuizzes.push({
+                                question: q.question,
+                                choices: q.choices,
+                                correct: q.correct_answer,
+                                explanation: q.explanation || ''
+                            });
+                        }
                     });
                 }
             }
-        });
-        
-        return selected;
-    }
-    
-    async fetchQuizzesFromFirestore(selectedPDFs) {
-        if (!window.firestoreReady) {
-            throw new Error('Firebase is not initialized yet. Please wait...');
         }
-        
-        const allQuizzes = [];
-        
-        for (const pdf of selectedPDFs) {
-            try {
-                const docSnap = await window.getQuizDoc(pdf.lectureName);
-                
-                if (docSnap && docSnap.exists()) {
-                    const data = docSnap.data();
-                    const lectureData = data[pdf.lectureNumber];
-                    
-                    if (lectureData && lectureData.quiz && Array.isArray(lectureData.quiz)) {
-                        const shuffledLectureQuizzes = lectureData.quiz.sort(() => Math.random() - 0.5);
-
-                        shuffledLectureQuizzes.forEach((quizItem, index) => {
-                            if (quizItem.question && quizItem.choices && quizItem.correct_answer) {
-                                const choices = quizItem.choices.map(choice => ({
-                                    text: choice,
-                                    correct: choice === quizItem.correct_answer
-                                }));
-
-                                allQuizzes.push({
-                                    id: `L${pdf.lectureNumber}-Q${index + 1}`,
-                                    question: quizItem.question,
-                                    choices: choices,
-                                    explanation: quizItem.explanation || ''
-                                });
-                            }
-                        });
-                    }
-                } else {
-                    console.warn(`No document found for lecture: ${pdf.lectureName}`);
-                }
-            } catch (error) {
-                console.error(`Error fetching quiz for ${pdf.fullName}:`, error);
-            }
-        }
-        
-        if (allQuizzes.length === 0) {
-            console.warn('No quizzes found in Firestore for selected PDFs');
-        }
-        
         return allQuizzes.sort(() => Math.random() - 0.5);
     }
 
     renderQuestion() {
-        const quiz = this.state.quizData[this.state.currentIndex];
-        if (!quiz) return;
+        const q = this.state.quizData[this.state.currIndex];
+        const maxChoices = this.state.settings.choices;
         
-        const { choices: numChoices } = this.state.settings;
-        const correct = quiz.choices.find(c => c.correct);
-        const wrong = quiz.choices.filter(c => !c.correct);
-        
-        let selected = correct ? [correct, ...wrong.slice(0, numChoices - 1)] : quiz.choices.slice(0, numChoices);
-        selected.sort(() => Math.random() - 0.5);
-        
-        const questionEl = this.elements.questionArea?.querySelector('p.text-2, p');
-        if (questionEl) {
-            questionEl.textContent = quiz.question;
-            questionEl.style.direction = isArabic(quiz.question) ? 'rtl' : 'ltr';
-        }
-        
-        const oldChoices = this.elements.content?.querySelector('.quiz-choices');
-        if (oldChoices) {
-            oldChoices.classList.add('off');
-            setTimeout(() => oldChoices.remove(), 300);
-        }
-        
-        const container = document.createElement('div');
-        container.className = 'quiz-choices w-[100%] flex col gap-[10px] off';
-        container.setAttribute('qoc', `${quiz.question}, ${correct?.text || ''}`);
-        
-        selected.forEach(choice => {
+        this.dom.game.curr.textContent = this.state.currIndex + 1;
+        this.dom.game.total.textContent = this.state.quizData.length;
+        this.dom.game.text.textContent = q.question;
+        this.dom.game.text.style.direction = this.getDirection(q.question);
+
+        const container = this.dom.game.choices;
+        container.innerHTML = '';
+
+        let choicesList = q.choices.filter(c => c !== q.correct);
+        choicesList.sort(() => Math.random() - 0.5);
+        choicesList = choicesList.slice(0, maxChoices - 1);
+        choicesList.push(q.correct);
+        choicesList.sort(() => Math.random() - 0.5);
+
+        choicesList.forEach(txt => {
             const btn = document.createElement('button');
-            btn.className = 'quiz-choice w-[100%] flex center text';
-            btn.textContent = choice.text;
-            btn.style.direction = isArabic(choice.text) ? 'rtl' : 'ltr';
-            btn.dataset.correct = choice.correct;
-            btn.addEventListener('click', e => this.selectChoice(e, choice));
+            const isSelected = this.state.userAnswers[this.state.currIndex] === txt;
+            btn.className = `choice-btn text-1 ${isSelected ? 'selected' : ''}`;
+            btn.textContent = txt;
+            const dir = this.getDirection(txt);
+            btn.style.direction = dir;
+            btn.style.textAlign = dir === 'rtl' ? 'right' : 'left';
+            
+            btn.onclick = () => {
+                this.state.userAnswers[this.state.currIndex] = txt;
+                container.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+            };
             container.appendChild(btn);
         });
-        
-        this.elements.questionArea?.appendChild(container);
-        setTimeout(() => container.classList.remove('off'), 50);
-        
-        this.restoreSelection();
-        this.updateNavigation();
+
+        this.dom.game.prev.disabled = this.state.currIndex === 0;
+        this.dom.game.next.textContent = this.state.currIndex === this.state.quizData.length - 1 ? 'إنهاء' : 'التالي';
     }
 
-    selectChoice(e, choice) {
-        e.stopPropagation();
-        
-        this.elements.content?.querySelectorAll('.quiz-choice').forEach(c => c.classList.remove('selected'));
-        e.target.classList.add('selected');
-        
-        this.state.userAnswers[this.state.currentIndex] = {
-            selected: choice.text,
-            correct: choice.correct
-        };
-        
-        this.elements.nextBtn?.classList.remove('disabled');
-        if (this.elements.nextBtn) this.elements.nextBtn.disabled = false;
-    }
-
-    restoreSelection() {
-        const answer = this.state.userAnswers[this.state.currentIndex];
-        if (!answer?.selected) return;
-        
-        const buttons = this.elements.content?.querySelectorAll('.quiz-choice') || [];
-        const match = Array.from(buttons).find(b => b.textContent === answer.selected);
-        if (match) {
-            buttons.forEach(b => b.classList.remove('selected'));
-            match.classList.add('selected');
-        }
-    }
-
-    updateNavigation() {
-        const { currentIndex } = this.state;
-        const total = this.state.quizData.length;
-        
-        if (this.elements.prevBtn) {
-            this.elements.prevBtn.textContent = currentIndex === 0 ? 'Cancel' : 'Previous';
-        }
-        
-        if (this.elements.nextBtn) {
-            this.elements.nextBtn.textContent = currentIndex === total - 1 ? 'Finish' : 'Next';
-            this.elements.nextBtn.disabled = false;
-            this.elements.nextBtn.classList.remove('disabled');
-        }
-    }
-
-    handlePrevious(e) {
-        e.stopPropagation();
-        
-        if (this.state.currentIndex === 0) {
-            this.reset();
-        } else {
-            this.state.currentIndex--;
-            this.renderQuestion();
-        }
-    }
-
-    handleNext(e) {
-        e.stopPropagation();
-        
-        if (!this.state.userAnswers[this.state.currentIndex]?.selected) {
-            this.state.userAnswers[this.state.currentIndex] = { selected: 'لم يتم الاجابة', correct: false };
-        }
-        
-        if (this.state.currentIndex < this.state.quizData.length - 1) {
-            this.state.currentIndex++;
-            this.renderQuestion();
-        } else {
+    navigate(dir) {
+        const newIdx = this.state.currIndex + dir;
+        if (newIdx >= this.state.quizData.length) {
             this.finishQuiz();
+        } else {
+            this.state.currIndex = newIdx;
+            this.renderQuestion();
         }
     }
 
     startTimer() {
-        if (this.state.timer) clearInterval(this.state.timer);
-
-        this.state.timeRemaining = this.state.settings.timer * 60;
-
+        if (this.state.timerInterval) clearInterval(this.state.timerInterval);
         const update = () => {
             const m = Math.floor(this.state.timeRemaining / 60);
             const s = this.state.timeRemaining % 60;
-            if (this.elements.timerDisplay) {
-                this.elements.timerDisplay.textContent = `${m}:${s.toString().padStart(2, '0')}`;
-            }
-        };
-
-        update();
-
-        this.state.timer = setInterval(() => {
+            this.dom.game.timer.textContent = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+            if (this.state.timeRemaining <= 0) this.finishQuiz();
             this.state.timeRemaining--;
-            update();
-
-            if (this.state.timeRemaining <= 0) {
-                clearInterval(this.state.timer);
-                this.state.timer = null;
-                this.finishQuiz();
-            }
-        }, 1000);
-    }
-
-    async incrementQuizTimes() {
-        const userNumber = localStorage.getItem("Number");
-        if (!userNumber) return;
-
-        await window.incrementQuizTimes(userNumber);
-    }
-
-    animateTimerText(target, duration = 1000) {
-        if (!this.elements.timerDisplay) return;
-        
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:';
-        const steps = 20;
-        let step = 0;
-        
-        const interval = setInterval(() => {
-            if (step >= steps) {
-                this.elements.timerDisplay.textContent = target;
-                clearInterval(interval);
-                return;
-            }
-            
-            const progress = step / steps;
-            let text = '';
-            
-            for (let i = 0; i < target.length; i++) {
-                text += Math.random() < progress ? target[i] : chars[Math.floor(Math.random() * chars.length)];
-            }
-            
-            this.elements.timerDisplay.textContent = text;
-            step++;
-        }, duration / steps);
+        };
+        update();
+        this.state.timerInterval = setInterval(update, 1000);
     }
 
     finishQuiz() {
-        if (this.state.timer) {
-            clearInterval(this.state.timer);
-            this.state.timer = null;
-        }
-        
-        for (let i = 0; i < this.state.quizData.length; i++) {
-            if (!this.state.userAnswers[i]) {
-                this.state.userAnswers[i] = { selected: null, correct: false };
-            }
-        }
-        
-        this.state.correctCount = this.state.userAnswers.filter(a => a?.correct).length;
-        
-        this.elements.questionArea?.classList.add('off');
-        this.elements.navigation?.classList.add('off');
-        this.elements.resultArea?.classList.remove('off');
-        
-        if (this.elements.resultScore) {
-            this.elements.resultScore.textContent = this.state.correctCount;
-        }
-        
-        const resultText = this.elements.resultArea?.querySelector('p.text');
-        if (resultText) {
-            resultText.textContent = `${this.state.correctCount} out of ${this.state.quizData.length}`;
-        }
-        
-        this.showResultSection();
-    }
-
-    populateResults() {
-        const rs = this.elements.resultSection;
-        if (!rs) return;
-
-        let container = rs.querySelector('.flex.col[style*="gap: 10px"]');
-        if (!container) container = rs.querySelector('.w-\\[100\\%\\].flex.col.gap-\\[10px\\]');
-        if (!container) {
-            container = document.createElement('div');
-            container.className = 'flex col';
-            container.style.cssText = 'width: 100%; gap: 10px;';
-            rs.appendChild(container);
-        }
-
+        if (this.state.timerInterval) clearInterval(this.state.timerInterval);
+        let score = 0;
+        const container = this.dom.result.list;
         container.innerHTML = '';
 
-        this.state.quizData.forEach((quiz, i) => {
-            const answer = this.state.userAnswers[i];
-            const selected = answer?.selected || 'لم تجب';
-            const isCorrect = answer?.correct || false;
-            const correctAnswer = quiz.choices.find(c => c.correct)?.text || '';
+        this.state.quizData.forEach((q, i) => {
+            const userAns = this.state.userAnswers[i];
+            const isCorrect = userAns === q.correct;
+            if (isCorrect) score++;
 
-            const box = document.createElement('div');
-            box.className = 'result-box flex col';
-            box.style.cssText = `
-                gap: 5px;
-                padding: 10px;
-                border: 2px solid ${isCorrect ? '#00c853' : '#d50000'};
-                border-radius: 8px;
-                background: ${isCorrect ? 'rgba(0,200,83,0.1)' : 'rgba(213,0,0,0.1)'};
+            const div = document.createElement('div');
+            div.className = `review-item flex col gap-[5px] ${isCorrect ? 'correct' : 'wrong'}`;
+            const qDir = this.getDirection(q.question);
+            const ansDir = this.getDirection(userAns || '');
+
+            div.innerHTML = `
+                <p class="text-1" style="direction:${qDir}; text-align:${qDir==='rtl'?'right':'left'}">${i+1}. ${q.question}</p>
+                <div class="flex row j-between a-center mt-[5px]">
+                    <span class="text-1 fs-[0.9rem]" style="color:${isCorrect?'var(--green-2)':'var(--fb)'}; direction:${ansDir}">
+                        ${userAns || 'لم يتم الاجابة'}
+                    </span>
+                    ${!isCorrect ? `<span class="text-1 fs-[0.8rem] op-[0.5]">الصح: ${q.correct}</span>` : ''}
+                </div>
             `;
-
-            const questionDir = isArabic(quiz.question) ? 'rtl' : 'ltr';
-            const answerDir = isArabic(selected) ? 'rtl' : 'ltr';
-            const correctDir = isArabic(correctAnswer) ? 'rtl' : 'ltr';
-
-            box.innerHTML = `
-                <p class="text-2" style="direction: ${questionDir};">Question ${i + 1}: ${quiz.question}</p>
-                <hr>
-                <p class="text" style="direction: ${answerDir};">إجابتك: <span>${selected}</span></p>
-                <p class="text-1" style="opacity: 0.4; direction: ${correctDir};">
-                    ${isCorrect ? 'انت صح!' : `خطأ! الإجابة الصحيحة: <strong>${correctAnswer}</strong>`}
-                </p>
-            `;
-
-            container.appendChild(box);
+            container.appendChild(div);
         });
+
+        const pct = Math.round((score / this.state.quizData.length) * 100);
+        this.dom.result.val.textContent = `${pct}%`;
+        const color = pct >= 50 ? 'var(--green-2)' : 'var(--fb)';
+        this.dom.result.circle.style.stroke = color;
+        this.switchView('result');
+        setTimeout(() => this.dom.result.circle.setAttribute('stroke-dasharray', `${pct}, 100`), 100);
     }
 
     reset() {
-        if (this.state.timer) {
-            clearInterval(this.state.timer);
-            this.state.timer = null;
-        }
-        
-        if (this.elements.timerDisplay) {
-            this.elements.timerDisplay.textContent = this.originalTimerText;
-        }
-        
-        this.state.currentIndex = 0;
-        this.state.quizData = [];
-        this.state.userAnswers = [];
-        this.state.correctCount = 0;
-        this.state.timeRemaining = 0;
-        
-        this.elements.content?.querySelectorAll('.quiz-choices').forEach(c => c.remove());
-        
-        const questionEl = this.elements.questionArea?.querySelector('p.text-2, p');
-        if (questionEl) questionEl.textContent = 'Question Here';
-        
-        this.elements.questionArea?.classList.remove('off');
-        this.elements.navigation?.classList.remove('off');
-        this.elements.resultArea?.classList.add('off');
-        
-        const rs = this.elements.resultSection;
-        if (rs) {
-            rs.classList.add('off');
-            rs.classList.remove('r-opened');
-            
-            const icon = rs.querySelector('img[alt="Results"]');
-            const align = rs.querySelector('p.align');
-            let container = rs.querySelector('.flex.col[style*="gap: 10px"]');
-            if (!container) container = rs.querySelector('.w-\\[100\\%\\].flex.col.gap-\\[10px\\]');
-            
-            icon?.classList.remove('off');
-            align?.classList.add('off');
-            container?.classList.add('off');
-        }
-        
-        this.elements.content?.classList.add('off');
-        this.elements.options?.classList.remove('off');
-        
-        if (this.elements.prevBtn) this.elements.prevBtn.textContent = 'Previous';
-        if (this.elements.nextBtn) {
-            this.elements.nextBtn.textContent = 'Next';
-            this.elements.nextBtn.disabled = false;
-        }
-    }
-
-    closeQuiz(e) {
-        e.stopPropagation();
-        
-        this.reset();
-        
-        this.elements.options?.classList.add('off');
-        this.elements.content?.classList.add('off');
-        ['.close-btn', '#qi-timer', '.quiz-control'].forEach(sel => 
-            this.quiz.querySelector(sel)?.classList.add('off')
-        );
-        
-        this.quiz.classList.remove('q-opened');
-        
-        setTimeout(() => this.elements.icon?.classList.remove('off'), 200);
+        if (this.state.timerInterval) clearInterval(this.state.timerInterval);
+        this.switchView('setup');
     }
 }
 
-// =====================================
-// Quiz Control (PDF Selection)
-// =====================================
-class QuizControl {
-    constructor(element) {
-        if (!element) return;
-        
-        this.control = element;
-        this.elements = {
-            icon: element.querySelector('img[alt="PDF"]'),
-            text: element.querySelector('p.align'),
-            slider: element.querySelector('.slider-outlaw'),
-            pdfSelect: element.querySelector('.pdf-selecting-for-quiz')
-        };
-        
-        this.init();
-    }
-
-    init() {
-        this.attachEvents();
-        this.populatePDFs();
-    }
-
-    attachEvents() {
-        this.control.addEventListener('click', e => this.open(e));
-        
-        document.addEventListener('click', e => {
-            if (!this.control.contains(e.target) && this.control.classList.contains('pdfq-opened')) {
-                this.close();
-            }
-        });
-        
-        this.elements.slider?.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', () => this.selectLecture(btn));
-        });
-    }
-
-    open(e) {
-        if (this.control.classList.contains('pdfq-opened')) return;
-        
-        e.stopPropagation();
-        this.elements.icon?.classList.add('off');
-        this.control.classList.add('pdfq-opened');
-        [this.elements.text, this.elements.slider, this.elements.pdfSelect].forEach(el => el?.classList.remove('off'));
-        
-        const activeBtn = this.elements.slider?.querySelector('button.active');
-        if (activeBtn) this.populatePDFs(activeBtn.textContent.trim());
-    }
-
-    close() {
-        [this.elements.text, this.elements.slider, this.elements.pdfSelect].forEach(el => el?.classList.add('off'));
-        this.control.classList.remove('pdfq-opened');
-        this.elements.icon?.classList.remove('off');
-    }
-
-    selectLecture(btn) {
-        this.elements.slider?.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.populatePDFs(btn.textContent.trim());
-    }
-
-    populatePDFs(lectureName) {
-        if (!this.elements.pdfSelect || !lectureName) return;
-        
-        this.elements.pdfSelect.innerHTML = '';
-        this.elements.pdfSelect.setAttribute('data-lecture', lectureName);
-        
-        const matching = [];
-        for (const week in window.pdfCache || {}) {
-            (window.pdfCache[week] || []).forEach(pdf => {
-                const display = pdf.name.replace('.pdf', '');
-                if (display.startsWith(lectureName)) {
-                    matching.push({ ...pdf, displayName: display });
-                }
-            });
-        }
-        
-        matching.forEach(pdf => {
-            const choice = document.createElement('div');
-            choice.className = 'pdf-choice';
-            choice.innerHTML = `
-                <img src="Assets/icon/pdf.png" alt="PDF" width="28" height="28">
-                <p class="text-1">${pdf.displayName}</p>
-                <div class="checkBox">
-                    <input type="checkbox" data-url="${pdf.url}">
-                </div>
-            `;
-            
-            choice.addEventListener('click', () => {
-                const checkbox = choice.querySelector('input');
-                if (checkbox) {
-                    checkbox.checked = !checkbox.checked;
-                    choice.classList.toggle('active', checkbox.checked);
-                }
-            });
-            
-            this.elements.pdfSelect.appendChild(choice);
-        });
-    }
-}
-
-// =====================================
-// Initialize Quiz Systems
-// =====================================
 document.addEventListener('DOMContentLoaded', () => {
-    const quizEl = document.querySelector('.quizi');
-    const controlEl = document.querySelector('.quiz-control');
-    
-    if (quizEl) new QuizSystem(quizEl);
-    if (controlEl) new QuizControl(controlEl);
+    new QuiziApp();
 });

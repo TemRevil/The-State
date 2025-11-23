@@ -600,6 +600,12 @@ function setupAddModalListeners() {
       return;
     }
 
+    // Check if number already exists
+    if (state.numbers.some(n => n.number === number)) {
+      alert('This number already exists!');
+      return;
+    }
+
     try {
       await setDoc(doc(db, "Numbers", number), {
         "PDF-Down": pdf,
@@ -610,7 +616,12 @@ function setupAddModalListeners() {
 
       state.numbers.push({ id: number, number: number, name: '', quizTimes: 0, quizEnabled: true, pdfDown: pdf });
       renderNumbersTable();
-      modal.classList.add('off');
+
+      // Reset the input
+      document.getElementById('inp-number').value = '';
+
+      // Show success alert and keep modal open
+      alert('Number added successfully!');
     } catch (error) {
       console.error('Error adding number:', error);
       alert('Failed to add number. Please try again.');
@@ -737,17 +748,24 @@ function createElement(tag, classes = [], attributes = {}, children = []) {
 
 document.addEventListener('DOMContentLoaded', () => {
   // Firebase Auth State Listener
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
+  onAuthStateChanged(auth, async (user) => {
+    const allowedUid = "s5rGItmRedXGhgjKr0hUW256Xor1";
+    if (user && user.uid === allowedUid) {
       // User is signed in, proceed with dashboard initialization
       if(db) initDashboard();
       console.log("User is signed in:", user.uid);
       // You might want to store the UID globally or in state if needed elsewhere
       state.currentUserUid = user.uid; 
     } else {
-      // No user is signed in, redirect to login page
-      console.log("No user signed in, redirecting to index.html");
-      window.location.href = 'index.html';
+      // If a user is logged in but it's not the correct one, sign them out.
+      if (user) {
+        console.log(`Unauthorized user (${user.uid}) detected. Signing out.`);
+        await signOut(auth);
+      } else {
+        console.log("No user signed in, redirecting to index.html");
+      }
+      // Redirect to the login page in either case.
+      window.location.href = 'index.html'; 
     }
   });
 
@@ -1402,9 +1420,34 @@ function setupUploadModalListeners() {
     try {
       await safeUploadBytes(fileRef, file);
       alert('File uploaded successfully!');
+
+      // Send notification if allowed
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('PDF Uploaded', {
+          body: `A new PDF has been uploaded: ${fileName}`,
+          icon: 'Assets/icon/pdf.png' // Assuming there's a PDF icon
+        });
+      }
+
+      // Add the uploaded file to the current path's cache immediately
+      const currentPath = state.currentPath || '';
+      if (!state.fileCache[currentPath]) {
+        state.fileCache[currentPath] = { files: [], folders: [] };
+      }
+      // Get download URL for the new file
+      const url = await safeGetDownloadURL(fileRef);
+      if (url) {
+        state.fileCache[currentPath].files.push({
+          name: fileName,
+          fullPath: filePath,
+          url: url,
+          type: 'file'
+        });
+      }
+
       modal.classList.add('off');
       fileInput.value = ''; // Reset input
-      cacheAllFiles().then(() => renderFileExplorer());
+      renderFileExplorer(); // Render immediately with updated cache
     } catch (error) {
       console.error('Error uploading file:', error);
       alert('Failed to upload file. See console for details.');

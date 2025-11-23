@@ -110,103 +110,105 @@
         <button class="close-pdf-btn"><svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="50" height="50" viewBox="0,0,255.99599,255.99599"><g fill="#ffffff" fill-rule="nonzero" stroke="none" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-dasharray="" stroke-dashoffset="0" font-family="none" font-weight="none" font-size="none" text-anchor="none" style="mix-blend-mode: normal"><g transform="scale(5.12,5.12)"><path d="M7.71875,6.28125l-1.4375,1.4375l17.28125,17.28125l-17.28125,17.28125l1.4375,1.4375l17.28125,-17.28125l17.28125,17.28125l1.4375,-1.4375l-17.28125,-17.28125l17.28125,-17.28125l-1.4375,-1.4375l-17.28125,17.28125z"></path></g></g></svg></button>
         <iframe src="" frameborder="0" class="pdf-frame"></iframe>
     </section>
-    <section class="quizi flex col center gap-[10px] off">
-        <img src="Assets/icon/quiz.png" alt="Quiz" class="w-[70%]">
-        <button class="close-btn off"><svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="50" height="50" viewBox="0,0,255.99599,255.99599"><g fill="#ffffff" fill-rule="nonzero" stroke="none" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-dasharray="" stroke-dashoffset="0" font-family="none" font-weight="none" font-size="none" text-anchor="none" style="mix-blend-mode: normal"><g transform="scale(5.12,5.12)"><path d="M7.71875,6.28125l-1.4375,1.4375l17.28125,17.28125l-17.28125,17.28125l1.4375,1.4375l17.28125,-17.28125l17.28125,17.28125l1.4375,-1.4375l-17.28125,-17.28125l17.28125,-17.28125l-1.4375,-1.4375l-17.28125,17.28125z"></path></g></g></svg></button>
-        <p class="quiz-title title off" id="qi-timer">Quiz!</p>
-        <div class="quizi-opt w-[100%] wx-[420px] wn-[310px] flex col gap-[20px] off">
-            <div class="w-[100%] flex row j-between">
-                <p class="align">Timer <span class="text-1 op-[0.4]">"15.min Max"</span></p>
-                <input type="text" class="range-input" id="q-timer" mm="2,15">
+    <button id="quiz-trigger" class="quizi quiz-floating-btn flex center">
+        <img src="Assets/icon/quiz.png" alt="Quiz">
+    </button>
+    <section id="quiz-modal" class="quiz-overlay flex center off">
+        <div class="quiz-card">
+            <div class="quiz-header flex row j-between a-center">
+                <h2 id="quiz-title" class="align">إعدادات الكويز</h2>
+                <button id="close-quiz" class="icon-btn flex center">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
             </div>
-            <div class="w-[100%] flex row j-between">
-                <p class="align">Quizes <span class="text-1 op-[0.4]">"20 Max"</span></p>
-                <input type="text" class="range-input" id="q-quiz" mm="5,20">
-            </div>
-            <div class="w-[100%] flex row j-between">
-                <p class="align">Quize Choices <span class="text-1 op-[0.4]">"5 Max"</span></p>
-                <input type="text" class="range-input" id="q-choices" mm="3,5">
-            </div>
-            <div class="w-[100%] flex col center gap-[10px]">
-                <button class="sq-btn w-[100%] flex center text">Start Quiz</button>
-                <button class="close-btn-2 text-1">Close</button>
-            </div>
-        </div>
-        <div class="quiz-content w-[100%] wx-[720px] wn-[420px] flex col j-c gap-[20px] off" q-timer="" q-quiz="" q-choices="" quizes="{Q1:Hello='One, Two, ~Three, four'}, {Q2:World='Red, ~Blue, Green, Yellow'}, {Q3:Test='Apple, ~Banana, Orange, Grape'}">
-            <div class="quiz-question flex col a-center gap-[50px]">
-                <p class="text-2">Question Here</p>
-                <div class="quiz-choices w-[100%] flex col gap-[10px]">
-                    <!-- <button class="quiz-choice w-[100%] flex center text">Berlin</button>
-                    <button class="quiz-choice w-[100%] flex center text">Madrid</button> -->
+            <div class="quiz-body">
+                <div id="view-setup" class="quiz-view">
+                    <div id="subject-tabs" class="tabs-container">
+                        <div class="text-1 op-[0.5]">جاري التحميل...</div>
+                    </div>
+
+                    <div class="pdf-selection-container">
+                        <p class="text-1 op-[0.7]">اختر المحاضرات:</p>
+                        <div id="pdf-list" class="pdf-list-box">
+                            <div class="empty-state text-1 op-[0.5] text-center mt-[20px]">اختر مادة أولاً</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-container">
+                        <div class="setting-row">
+                            <p class="text-1">عدد الأسئلة: <span id="lbl-count" class="val cl-[var(--pc)]">10</span></p>
+                            <input type="range" id="inp-count" min="5" max="15" value="10" class="revil-range">
+                        </div>
+                        <div class="setting-row">
+                            <p class="text-1">الوقت: <span id="lbl-timer" class="val cl-[var(--pc)]">5د</span></p>
+                            <input type="range" id="inp-timer" min="2" max="10" value="5" class="revil-range">
+                        </div>
+                        <div class="setting-row">
+                            <p class="text-1">الاختيارات: <span id="lbl-choices" class="val cl-[var(--pc)]">4</span></p>
+                            <input type="range" id="inp-choices" min="3" max="5" value="4" class="revil-range">
+                        </div>
+                    </div>
+
+                    <button id="btn-start" class="action-btn text">بدء الاختبار</button>
                 </div>
-            </div>
-            <div class="quiz-navigation w-[100%] flex row j-between">
-                <button class="prev-question sq-btn text-1">Previous</button>
-                <button class="next-question sq-btn text-1">Next</button>
-            </div>
-            <div class="DNF flex col center w-[100%] off">
-                <p class="title fs-[42px]">Your Result!</p>
-                <span class="title fs-[152px]" id="q-result">9</span>
-                <p class="text fs-[16px] op-[0.5]">9 out of 10</p>
-            </div>
-        </div>
-        <div class="result-sect flex col a-center gap-[5px] off">
-            <img src="Assets/icon/result.png" alt="Results" class="w-[70%]">
-            <p class="align off">Results</p>
-            <div class="w-[100%] flex col gap-[10px] off">
-                <div class="result-box flex col gap-[5px] pd-[10px]">
-                    <p class="text-2">ك1:Hello</p>
-                    <hr>
-                    <p class="text">إجابتك: <span>Three</span></p>
-                    <p class="text-1 op-[0.4]">انت صح!</p>
+                <div id="view-active" class="quiz-view off">
+                    <div class="game-bar">
+                        <div class="flex row a-center gap-[5px]">
+                            <span class="text-1">⏳</span>
+                            <span id="quiz-timer" class="text-1 font-mono">05:00</span>
+                        </div>
+                        <div class="flex row a-center gap-[5px]">
+                            <span id="q-curr" class="text-1 cl-[var(--pc)] font-mono">1</span>
+                            <span class="text-1">/</span>
+                            <span id="q-total" class="text-1 font-mono">10</span>
+                        </div>
+                    </div>
+
+                    <div class="question-container">
+                        <p id="q-text">...</p>
+                    </div>
+
+                    <div id="choices-area" class="choices-container"></div>
+
+                    <div class="nav-bar">
+                        <button id="btn-prev" class="nav-btn text-1" disabled>السابق</button>
+                        <button id="btn-next" class="nav-btn primary text-1">التالي</button>
+                    </div>
                 </div>
-                <div class="result-box flex col gap-[5px] pd-[10px]">
-                    <p class="text-2">ك2:Hello</p>
-                    <hr>
-                    <p class="text">إجابتك: <span>Three</span></p>
-                    <p class="text-1 op-[0.4]">انت صح!</p>
+                <div id="view-result" class="quiz-view off flex col a-center">
+                    <p class="align mb-[10px]">النتيجة النهائية</p>
+                    <div class="score-wrapper">
+                        <svg viewBox="0 0 36 36" class="circular-chart">
+                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path id="score-circle" class="circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        </svg>
+                        <span id="score-val" class="score-text">0%</span>
+                    </div>
+
+                    <div id="review-list" class="review-list-box"></div>
+
+                    <button id="btn-restart" class="action-btn text mt-[10px]">إعادة الاختبار</button>
                 </div>
-            </div>
-        </div>
-        <div class="quiz-control flex col off">
-            <img src="Assets/icon/pdf.png" alt="PDF">
-            <p class="align off">اختار الكويز!</p>
-            <div class="slider-outlaw flex row gap-[10px] off">
-                <button class="text active">مقدمة في الحاسبات</button>
-                <button class="text">مبادئ إقتصاد</button>
-                <button class="text">مبادئ تنظيم وإدارة</button>
-                <button class="text">مراسلات ومصطلحات اجنبية</button>
-                <button class="text">نظم تشغيل</button>
-            </div>
-            <div class="pdf-selecting-for-quiz flex col off" data-lecture="مقدمة في الحاسبات">
-                <!-- <div class="pdf-choice" data-name="Lecture-1" data-lect-locate="pdf-url">
-                    <label class="checkBox">
-                        <input type="checkbox" checked />
-                        <div class="transition"></div>
-                    </label>
-                    <img src="Assets/icon/pdf.png" alt="PDF">
-                    <p class="text-1">مقدمة في الحاسبات - Lecture 1</p>
-                </div> -->
             </div>
         </div>
     </section>
     <div class="to-dashboard-modal flex center off">
         <div class="to-dashboard-content flex row center gap-[20px]">
-            <button id="close-dashboard-modal" class="close-btn" style="position: absolute; top: 20px; right: 20px;">×</button>
+            <button id="close-dashboard-modal" class="close-btn text"><svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="50" height="50" viewBox="0,0,255.99599,255.99599"><g fill="#ffffff" fill-rule="nonzero" stroke="none" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-dasharray="" stroke-dashoffset="0" font-family="none" font-weight="none" font-size="none" text-anchor="none" style="mix-blend-mode: normal"><g transform="scale(5.12,5.12)"><path d="M7.71875,6.28125l-1.4375,1.4375l17.28125,17.28125l-17.28125,17.28125l1.4375,1.4375l17.28125,-17.28125l17.28125,17.28125l1.4375,-1.4375l-17.28125,-17.28125l17.28125,-17.28125l-1.4375,-1.4375l-17.28125,17.28125z"></path></g></g></svg></button>
             <img src="Assets/user/1.jpg" alt="Dashboard" class="user-img">
-            <div class="w-[5px] h-[200px] bc-[var(--ag-blur)] rd-[25px]"></div>
+            <div class="hr-line"></div>
             <div class="flex col gap-[15px]">
                 <div class="flex col">
                     <p class="align">Going to Action Center?</p>
-                    <p class="text-1 op-[0.5]">Only one person can get in!</p>
+                    <p class="text-1 op-[0.5]">Getting in while it's none of your business, will cause you trouble!</p>
                 </div>
                 <input type="password" id="dashboard-password" placeholder="Enter password" class="input text fs-[18px]">
                 <button id="submit-dashboard" class="two-btn rd-[15px]">Login</button>
             </div>
         </div>
     </div>
-    <script type="module" src="JavaScript/Revil.js"></script>
     <script type="module" src="JavaScript/firebase.js"></script>
     <script type="module" src="JavaScript/main.js"></script>
+    <script type="module" src="JavaScript/Revil.js"></script>
 </body>
 </html>

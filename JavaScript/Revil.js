@@ -1,5 +1,5 @@
 // =====================================
-// RevilDynamicCSS.js - Dynamic Utility Styles
+// Revil.js
 // =====================================
 
 class RevilDynamicCSS {
