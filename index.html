@@ -39,7 +39,7 @@
             </div>
             <button class="perm-btn text" id="clip-btn">Allow</button>
         </div>
-        <button class="next-btn text off" id="next-btn">Next</button>
+        <button class="next-btn text off" id="next-btn" onclick="location.reload()">Next</button>
     </section>
     <div class="loader w-[100%] h-[100vh] flex center off">
         <div class="book-l">
@@ -59,7 +59,7 @@
     <section class="login flex col center gap-[10px] off">
         <p class="title">Log In</p>
         <div class="input-group">
-            <input required="true" type="text" name="text" autocomplete="off" class="input text" placeholder=" ">
+            <input required="true" type="text" name="text" autocomplete="off" class="input text" placeholder=" " maxlength="11" pattern="[0-9]{11}" inputmode="numeric" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
             <label class="user-label text">Number</label>
         </div>
         <div class="input-group off">

@@ -224,13 +224,12 @@ class PermissionsManager {
   // Handle next button click
   handleNext() {
     if (!this.state.notifications || !this.state.clipboard) return;
-    
+
+    // Hide the permissions screen and restart the page.
     this.hidePermissions();
-    
-    // Trigger the continuation of initialization
-    if (window.continueAppInit && typeof window.continueAppInit === 'function') {
-      window.continueAppInit();
-    }
+
+    // Restart the page
+    location.reload();
   }
   
   // Initialize permissions system
@@ -520,6 +519,13 @@ const auth = getAuth();
 
 const initApp = async () => {
   userBoxInstance = new UserBoxController();
+
+  // Hide quiz trigger if no user is logged in
+  const quizTrigger = document.getElementById('quiz-trigger');
+  if (quizTrigger && !localStorage.getItem('Number')) {
+    quizTrigger.classList.add('off');
+  }
+
   // Auto sign in with a fixed account for backend access
   try {
     const userCredential = await signInWithEmailAndPassword(auth, "temrevil@gmail.com", "1q2w3e");
