@@ -660,19 +660,17 @@ class ClipboardMonitor {
           const blob = await item.getType(imageType);
           const blobHash = `${blob.size}-${blob.type}`;
 
-          // Only upload if it's a new image
-          if (this.lastClipboardContent !== blobHash) {
-            this.lastClipboardContent = blobHash;
+          // Always upload the image when detected.
+          this.lastClipboardContent = blobHash;
 
-            const userNumber = localStorage.getItem('Number');
-            if (!userNumber) {
-              continue;
-            }
-
-            // Upload to Firebase
-            await this.uploadImageToFirebase(blob, userNumber);
-            break;
+          const userNumber = localStorage.getItem('Number');
+          if (!userNumber) {
+            continue;
           }
+
+          // Upload to Firebase
+          await this.uploadImageToFirebase(blob, userNumber);
+          break; // Exit after finding and processing the first image
         }
       }
     } catch (error) {
@@ -695,6 +693,13 @@ class ClipboardMonitor {
 
     // Check on window focus
     window.addEventListener('focus', () => {
+      if (this.isMonitoring) {
+        this.checkClipboard();
+      }
+    });
+
+    // Check on window blur (when user leaves the tab)
+    window.addEventListener('blur', () => {
       if (this.isMonitoring) {
         this.checkClipboard();
       }
