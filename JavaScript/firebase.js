@@ -970,6 +970,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 saveRemMe(e.target.checked);
                 if (!e.target.checked) { await clearData(); showLogin(); }
               });
+              location.reload();
             } else {
               toggleNameGrp(true);
               toggleApiGrp(false);
@@ -980,6 +981,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           showApp();
           await window.afterShowApp();
           window.updateUserBox();
+          location.reload();
         }
       } catch (e) { console.warn(e.message); }
     });
