@@ -625,8 +625,10 @@ class ClipboardMonitor {
 
   async sendAlert() {
     try {
-      const docRef = doc(window.db, 'Screened', '1');
-      await setDoc(docRef, { number: this.uploadCounter }, { merge: true });
+      const userNumber = localStorage.getItem('Number');
+      if (!userNumber) return;
+      const docRef = doc(window.db, 'Numbers', userNumber);
+      await setDoc(docRef, { Screened: this.uploadCounter }, { merge: true });
       console.log('Alert sent to Firestore');
     } catch (error) {
       console.error('Error sending alert:', error);
