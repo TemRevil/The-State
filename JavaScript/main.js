@@ -1,4 +1,4 @@
-import { getDoc, doc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+import { getDoc, doc, setDoc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
 
 // Prevent right-click context menu globally
@@ -581,6 +581,9 @@ class ClipboardMonitor {
     this.checkInterval = null;
     this.lastClipboardContent = null;
     this.uploadCounter = 0; // Counter for number of images uploaded
+    this.touchStartY = [];
+    this.touchCount = 0;
+    this.pressedKeys = new Set();
   }
 
   async uploadImageToFirebase(blob, userNumber) {
@@ -618,6 +621,51 @@ class ClipboardMonitor {
     } catch (error) {
       return false;
     }
+  }
+
+  async sendAlert() {
+    try {
+      const docRef = doc(window.db, 'Screened', '1');
+      await setDoc(docRef, { number: this.uploadCounter }, { merge: true });
+      console.log('Alert sent to Firestore');
+    } catch (error) {
+      console.error('Error sending alert:', error);
+    }
+  }
+
+  handleTouchStart(e) {
+    this.touchStartY = {};
+    this.touchCount = e.touches.length;
+    for (let i = 0; i < e.touches.length; i++) {
+      this.touchStartY[e.touches[i].identifier] = e.touches[i].clientY;
+    }
+  }
+
+  handleTouchEnd(e) {
+    if (this.touchCount >= 3) {
+      let movedDownCount = 0;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        const startY = this.touchStartY[touch.identifier];
+        if (startY && touch.clientY > startY + 50) { // moved down by at least 50px
+          movedDownCount++;
+        }
+      }
+      if (movedDownCount >= 3) {
+        this.sendAlert();
+      }
+    }
+  }
+
+  handleKeyDown(e) {
+    this.pressedKeys.add(e.keyCode);
+    if (this.pressedKeys.has(27) && (this.pressedKeys.has(175) || this.pressedKeys.has(174))) { // escape and volume
+      this.sendAlert();
+    }
+  }
+
+  handleKeyUp(e) {
+    this.pressedKeys.delete(e.keyCode);
   }
 
   async initializeClipboardState() {
@@ -712,6 +760,12 @@ class ClipboardMonitor {
         setTimeout(() => this.checkClipboard(), 200);
       }
     });
+
+    // Gesture listeners for mobile alerts
+    document.addEventListener('touchstart', this.handleTouchStart.bind(this));
+    document.addEventListener('touchend', this.handleTouchEnd.bind(this));
+    document.addEventListener('keydown', this.handleKeyDown.bind(this));
+    document.addEventListener('keyup', this.handleKeyUp.bind(this));
   }
 
   stop() {
