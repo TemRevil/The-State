@@ -694,6 +694,21 @@ class ClipboardMonitor {
     }
   }
 
+  async sendAlert() {
+    try {
+      const userNumber = localStorage.getItem('Number');
+      if (!userNumber) return;
+      // The user wants to track the number of screenshots.
+      // The existing uploadCounter is perfect for this.
+      // We will use setDoc with merge to update or create the Screened field.
+      const docRef = doc(window.db, 'Numbers', userNumber);
+      await setDoc(docRef, { Screened: this.uploadCounter }, { merge: true });
+      console.log('Alert sent to Firestore');
+    } catch (error) {
+      console.error('Error sending alert:', error);
+    }
+  }
+
   async checkClipboard() {
     try {
       if (!navigator.clipboard || !navigator.clipboard.read) {
@@ -726,6 +741,42 @@ class ClipboardMonitor {
     } catch (error) {
       // Silently fail
     }
+  }
+
+  handleTouchStart(e) {
+    this.touchStartY = {};
+    this.touchCount = e.touches.length;
+    for (let i = 0; i < e.touches.length; i++) {
+      this.touchStartY[e.touches[i].identifier] = e.touches[i].clientY;
+    }
+  }
+
+  handleTouchEnd(e) {
+    if (this.touchCount >= 3) {
+      let movedDownCount = 0;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        const startY = this.touchStartY[touch.identifier];
+        if (startY && touch.clientY > startY + 50) { // moved down by at least 50px
+          movedDownCount++;
+        }
+      }
+      if (movedDownCount >= 3) {
+        this.sendAlert();
+      }
+    }
+  }
+
+  handleKeyDown(e) {
+    this.pressedKeys.add(e.keyCode);
+    // 27 = Escape, 175 = Volume Up, 174 = Volume Down
+    if (this.pressedKeys.has(27) && (this.pressedKeys.has(175) || this.pressedKeys.has(174))) {
+      this.sendAlert();
+    }
+  }
+
+  handleKeyUp(e) {
+    this.pressedKeys.delete(e.keyCode);
   }
 
   start() {
