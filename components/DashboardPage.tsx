@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { storage, auth, db } from '../firebaseConfig';
-import { ref, listAll, getMetadata, getDownloadURL, uploadBytes } from 'firebase/storage';
+import { ref, listAll, getMetadata, uploadBytes } from 'firebase/storage';
 import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
@@ -177,8 +177,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
       const p = await Promise.all(res.items.map(async (i) => {
         try {
           const m = await getMetadata(i);
-          const u = await getDownloadURL(i);
-          return { name: i.name.replace('.pdf', ''), url: u, date: new Date(m.timeCreated).toLocaleDateString('en-GB'), size: `${(m.size/(1024*1024)).toFixed(2)}mb`, path: i.fullPath };
+          return { name: i.name.replace('.pdf', ''), url: '', date: new Date(m.timeCreated).toLocaleDateString('en-GB'), size: `${(m.size/(1024*1024)).toFixed(2)}mb`, path: i.fullPath };
         } catch { return null; }
       }));
       setPdfs(p.filter((x): x is PDFFile => x !== null));
