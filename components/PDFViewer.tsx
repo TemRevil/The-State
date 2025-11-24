@@ -1,7 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { X, Download, Loader2, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Download, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { storage } from '../firebaseConfig';
 import { ref, getBytes } from 'firebase/storage';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Set up the worker for PDF.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface PDFViewerProps {
   pdf: { name: string; url: string; date: string; size: string; path: string } | null;
@@ -12,12 +16,21 @@ interface PDFViewerProps {
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, onViolation, canDownload }) => {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [rendering, setRendering] = useState(false);
 
+  // Load PDF from Firebase
   useEffect(() => {
     if (!pdf) {
+      setPdfDoc(null);
       setBlobUrl(null);
       return;
     }
@@ -25,13 +38,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     const loadPdf = async () => {
       setLoading(true);
       setError(null);
+      setCurrentPage(1);
+
       try {
-        // Extract the storage path from the URL or use provided path
         let storagePath = pdf.path;
-        
+
         if (!storagePath && pdf.url) {
-          // Parse path from storage URL if not provided
-          // URL format: https://firebasestorage.googleapis.com/v0/b/bucket/o/path%2Fto%2Ffile.pdf?alt=media&token=...
           const urlObj = new URL(pdf.url);
           const encodedPath = urlObj.pathname.split('/o/')[1]?.split('?')[0];
           if (encodedPath) {
@@ -43,14 +55,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
           throw new Error('Unable to determine file path');
         }
 
-        // Use Firebase SDK getBytes() to avoid CORS issues
+        // Fetch PDF bytes from Firebase
         const fileRef = ref(storage, storagePath);
         const bytes = await getBytes(fileRef);
-
-        // Create blob with correct MIME type
         const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(pdfBlob);
         setBlobUrl(url);
+
+        // Load PDF document
+        const doc = await pdfjsLib.getDocument(url).promise;
+        setPdfDoc(doc);
+        setTotalPages(doc.numPages);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error loading PDF';
         setError(errorMsg);
@@ -69,15 +84,64 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     };
   }, [pdf]);
 
-  const handleDownload = () => {
-    if (pdf && blobUrl) {
+  // Render current page
+  useEffect(() => {
+    if (!pdfDoc || !canvasRef.current) return;
+
+    const renderPage = async () => {
+      if (currentPage < 1 || currentPage > totalPages) return;
+
+      setRendering(true);
+      try {
+        const page = await pdfDoc.getPage(currentPage);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = canvasRef.current;
+
+        if (!canvas) return;
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+      } catch (err) {
+        console.error('Error rendering page:', err);
+      } finally {
+        setRendering(false);
+      }
+    };
+
+    renderPage();
+  }, [pdfDoc, currentPage, totalPages]);
+
+  const handleDownload = async () => {
+    if (!pdf || !blobUrl) return;
+
+    try {
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
       const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = pdf.name;
+      link.href = URL.createObjectURL(blob);
+      link.download = pdf.name.endsWith('.pdf') ? pdf.name : `${pdf.name}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      console.error('Download error:', err);
     }
+  };
+
+  const goToPage = (pageNum: number) => {
+    const newPage = Math.max(1, Math.min(pageNum, totalPages));
+    setCurrentPage(newPage);
   };
 
   if (!pdf) return null;
@@ -104,15 +168,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
           </div>
           
           <button 
-            onClick={() => { onClose(); }}
+            onClick={onClose}
             className="relative btn btn-danger w-full justify-center font-bold"
           >
             Close & Acknowledge
           </button>
         </div>
       ) : (
-        <div className="modal-content modal-xl relative flex flex-col">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-surface z-10">
+        <div className="modal-content modal-xl relative flex flex-col h-[90vh]">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-surface z-10 shrink-0">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
                 <AlertCircle size={18} />
@@ -124,7 +189,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
                 <button 
                   onClick={handleDownload} 
                   disabled={loading || !blobUrl}
-                  className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
                   title="Download PDF"
                 >
                   <Download size={20} />
@@ -135,8 +200,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
               </button>
             </div>
           </div>
-          
-          <div className="flex-1 bg-black relative overflow-hidden flex flex-col">
+
+          {/* Main Content */}
+          <div ref={containerRef} className="flex-1 bg-black relative overflow-auto flex flex-col items-center justify-start pt-4 pb-4">
             {loading ? (
               <div className="w-full h-full flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3">
@@ -153,17 +219,56 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
                   <p className="text-muted text-xs mt-2">Try downloading the file instead or contact support.</p>
                 </div>
               </div>
-            ) : blobUrl ? (
-              <iframe 
-                src={`${blobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
-                className="w-full h-full flex-1 relative z-10" 
-                title="Protected Document" 
-                sandbox="allow-scripts allow-same-origin"
-                style={{ border: 'none' }}
-                onError={() => setError('Failed to render PDF in viewer')}
-              />
+            ) : pdfDoc ? (
+              <>
+                <canvas 
+                  ref={canvasRef} 
+                  className="max-w-full border border-white/10 rounded-lg shadow-lg"
+                  style={{ maxHeight: 'calc(100% - 60px)' }}
+                />
+                {rendering && (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg pointer-events-none">
+                    <Loader2 size={24} className="animate-spin text-primary" />
+                  </div>
+                )}
+              </>
             ) : null}
           </div>
+
+          {/* Footer with Controls */}
+          {pdfDoc && totalPages > 0 && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-surface shrink-0 gap-4">
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
+                title="Previous page"
+              >
+                <ChevronLeft size={20} />
+              </button>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max={totalPages}
+                  value={currentPage}
+                  onChange={(e) => goToPage(parseInt(e.target.value) || 1)}
+                  className="w-12 px-2 py-1 bg-white/10 border border-white/20 rounded text-white text-center text-sm"
+                />
+                <span className="text-muted text-sm whitespace-nowrap">/ {totalPages}</span>
+              </div>
+
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
+                title="Next page"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
