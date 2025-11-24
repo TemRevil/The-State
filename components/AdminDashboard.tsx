@@ -533,14 +533,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                  
                  <div>
                     <label className="text-xs text-muted mb-3 block uppercase font-bold tracking-wider">PDF Permission</label>
-                    <div className="relative group">
-                       <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="w-full px-4 py-3.5 bg-gradient-to-r from-surface to-surface/80 border border-white/15 rounded-xl text-white text-sm font-medium cursor-pointer appearance-none shadow-sm hover:border-white/25 hover:from-surface/90 hover:to-surface/70 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/40 focus:shadow-lg transition-all duration-200">
-                          <option value="false" className="bg-surface text-white">🚫 Blocked (Default)</option>
-                          <option value="true" className="bg-surface text-white">✓ Allowed</option>
+                    <div className="relative">
+                       <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="login-input appearance-none bg-surface cursor-pointer">
+                          <option value="false">Blocked (Default)</option>
+                          <option value="true">Allowed</option>
                        </select>
-                       <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted group-hover:text-white group-focus-within:text-primary transition-colors duration-200">
-                          <svg className="w-5 h-5 transition-transform duration-200" fill="currentColor" viewBox="0 0 20 20">
-                             <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                       <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                           </svg>
                        </div>
                     </div>
