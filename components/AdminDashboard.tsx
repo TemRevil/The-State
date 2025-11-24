@@ -516,28 +516,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {/* MODALS */}
       {showAddModal && (
         <div className="modal-overlay">
-           <div className="modal-content modal-md p-6">
-              <div className="flex justify-between items-center mb-6">
-                 <h3 className="text-xl font-bold text-white">Add New User</h3>
-                 <button onClick={() => setShowAddModal(false)} className="btn-icon"><X size={20} /></button>
-              </div>
-              
-              <div className="space-y-4">
+           <div className="modal-content modal-md p-8">
+              <div className="flex justify-between items-center mb-8">
                  <div>
-                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">Phone Number (11 digits)</label>
-                    <input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="e.g., 201012345678" className="login-input" />
+                    <h3 className="text-2xl font-bold text-white">Add New User</h3>
+                    <p className="text-muted text-sm mt-1">Create a new user account</p>
+                 </div>
+                 <button onClick={() => setShowAddModal(false)} className="btn-icon text-muted hover:text-white"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-6">
+                 <div>
+                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">Phone Number</label>
+                    <input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Enter 11 digits" className="login-input w-full" />
                  </div>
                  
                  <div>
-                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">PDF Permission</label>
-                    <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="modal-select">
-                       <option value="false">🔒 Blocked (Default)</option>
-                       <option value="true">🔓 Allowed</option>
-                    </select>
+                    <label className="text-xs text-muted mb-3 block uppercase font-bold tracking-wider">PDF Permission</label>
+                    <div className="relative">
+                       <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="w-full px-4 py-3 bg-surface border border-white/10 rounded-lg text-white cursor-pointer appearance-none hover:border-white/20 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-colors">
+                          <option value="false" className="bg-surface text-white">Blocked (Default)</option>
+                          <option value="true" className="bg-surface text-white">Allowed</option>
+                       </select>
+                       <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                          </svg>
+                       </div>
+                    </div>
                  </div>
               </div>
 
-              <div className="flex justify-end gap-3 mt-8">
+              <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/10">
                  <button onClick={() => setShowAddModal(false)} className="btn btn-ghost">Cancel</button>
                  <button onClick={handleCreateUser} className="btn btn-primary">Create User</button>
               </div>
