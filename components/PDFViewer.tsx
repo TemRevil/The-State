@@ -4,7 +4,7 @@ import { storage } from '../firebaseConfig';
 import { ref, getBytes } from 'firebase/storage';
 
 interface PDFViewerProps {
-  pdf: { name: string; url: string; date: string; size: string; path?: string } | null;
+  pdf: { name: string; url: string; date: string; size: string; path: string } | null;
   onClose: () => void;
   violation: boolean;
   onViolation: () => void;

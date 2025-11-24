@@ -7,7 +7,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
 import { PDFViewer } from './PDFViewer';
 
-interface PDFFile { name: string; url: string; date: string; size: string; path?: string; }
+interface PDFFile { name: string; url: string; date: string; size: string; path: string; }
 interface DashboardPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
 const ALLOWED_ADMIN_UIDS = ["SveIem0WRcSCKl1IK44dZ1KfalO2", "s5rGItmRedXGhgjKr0hUW256Xor1"];
 
