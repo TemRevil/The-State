@@ -35,11 +35,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       return;
     }
 
-    const loadPdf = async () => {
-      setLoading(true);
-      setError(null);
-      setCurrentPage(1);
+    setLoading(true);
+    setError(null);
+    setCurrentPage(1);
 
+    let createdBlobUrl: string | null = null;
+    let loadedDoc: any = null;
+
+    (async () => {
       try {
         let storagePath = pdf.path;
 
@@ -58,14 +61,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
         // Fetch PDF bytes from Firebase
         const fileRef = ref(storage, storagePath);
         const bytes = await getBytes(fileRef);
-        const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(pdfBlob);
-        setBlobUrl(url);
 
-        // Load PDF document
-        const doc = await pdfjsLib.getDocument(url).promise;
-        setPdfDoc(doc);
-        setTotalPages(doc.numPages);
+        // Create a blob URL for download/use in the UI, but pass raw bytes to pdf.js
+        const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
+        createdBlobUrl = URL.createObjectURL(pdfBlob);
+        setBlobUrl(createdBlobUrl);
+
+        // Load PDF document directly from bytes (avoids any extra network/CORS)
+        loadedDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+        setPdfDoc(loadedDoc);
+        setTotalPages(loadedDoc.numPages);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error loading PDF';
         setError(errorMsg);
@@ -73,13 +78,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       } finally {
         setLoading(false);
       }
-    };
-
-    loadPdf();
+    })();
 
     return () => {
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
+      // cleanup the created blob URL and destroy loaded pdf doc to free memory
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
+      if (loadedDoc && typeof loadedDoc.destroy === 'function') {
+        try {
+          loadedDoc.destroy();
+        } catch (e) {
+          // ignore
+        }
       }
     };
   }, [pdf]);
@@ -123,17 +134,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
 
   const handleDownload = async () => {
     if (!pdf || !blobUrl) return;
-
     try {
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = blobUrl;
       link.download = pdf.name.endsWith('.pdf') ? pdf.name : `${pdf.name}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
     } catch (err) {
       console.error('Download error:', err);
     }
