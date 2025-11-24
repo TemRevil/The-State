@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { X, Download, Loader2, AlertCircle } from 'lucide-react';
+import { storage } from '../firebaseConfig';
+import { ref, getBytes } from 'firebase/storage';
 
 interface PDFViewerProps {
-  pdf: { name: string; url: string; date: string; size: string } | null;
+  pdf: { name: string; url: string; date: string; size: string; path?: string } | null;
   onClose: () => void;
   violation: boolean;
   onViolation: () => void;
@@ -24,27 +26,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       setLoading(true);
       setError(null);
       try {
-        // Fetch the PDF from the storage URL
-        const response = await fetch(pdf.url, {
-          mode: 'cors',
-          credentials: 'omit'
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch PDF: ${response.status}`);
+        // Extract the storage path from the URL or use provided path
+        let storagePath = pdf.path;
+        
+        if (!storagePath && pdf.url) {
+          // Parse path from storage URL if not provided
+          // URL format: https://firebasestorage.googleapis.com/v0/b/bucket/o/path%2Fto%2Ffile.pdf?alt=media&token=...
+          const urlObj = new URL(pdf.url);
+          const encodedPath = urlObj.pathname.split('/o/')[1]?.split('?')[0];
+          if (encodedPath) {
+            storagePath = decodeURIComponent(encodedPath);
+          }
         }
 
-        const blob = await response.blob();
-
-        // Ensure blob has correct MIME type
-        if (blob.type !== 'application/pdf') {
-          const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-          const url = URL.createObjectURL(pdfBlob);
-          setBlobUrl(url);
-        } else {
-          const url = URL.createObjectURL(blob);
-          setBlobUrl(url);
+        if (!storagePath) {
+          throw new Error('Unable to determine file path');
         }
+
+        // Use Firebase SDK getBytes() to avoid CORS issues
+        const fileRef = ref(storage, storagePath);
+        const bytes = await getBytes(fileRef);
+
+        // Create blob with correct MIME type
+        const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(pdfBlob);
+        setBlobUrl(url);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error loading PDF';
         setError(errorMsg);

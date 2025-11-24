@@ -7,7 +7,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
 import { PDFViewer } from './PDFViewer';
 
-interface PDFFile { name: string; url: string; date: string; size: string; }
+interface PDFFile { name: string; url: string; date: string; size: string; path?: string; }
 interface DashboardPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
 const ALLOWED_ADMIN_UIDS = ["SveIem0WRcSCKl1IK44dZ1KfalO2", "s5rGItmRedXGhgjKr0hUW256Xor1"];
 
@@ -178,7 +178,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
         try {
           const m = await getMetadata(i);
           const u = await getDownloadURL(i);
-          return { name: i.name.replace('.pdf', ''), url: u, date: new Date(m.timeCreated).toLocaleDateString('en-GB'), size: `${(m.size/(1024*1024)).toFixed(2)}mb` };
+          return { name: i.name.replace('.pdf', ''), url: u, date: new Date(m.timeCreated).toLocaleDateString('en-GB'), size: `${(m.size/(1024*1024)).toFixed(2)}mb`, path: i.fullPath };
         } catch { return null; }
       }));
       setPdfs(p.filter((x): x is PDFFile => x !== null));
