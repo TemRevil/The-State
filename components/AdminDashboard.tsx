@@ -521,17 +521,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                  <h3 className="text-xl font-bold text-white">Add New User</h3>
                  <button onClick={() => setShowAddModal(false)} className="btn-icon"><X size={20} /></button>
               </div>
-              <input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Phone Number (11 digits)" className="login-input mb-4" />
               
-              <div className="mb-6">
-                 <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">PDF Permission</label>
-                 <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="login-input appearance-none bg-surface cursor-pointer">
-                    <option value="false">Blocked (Default)</option>
-                    <option value="true">Allowed</option>
-                 </select>
+              <div className="space-y-4">
+                 <div>
+                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">Phone Number (11 digits)</label>
+                    <input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="e.g., 201012345678" className="login-input" />
+                 </div>
+                 
+                 <div>
+                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">PDF Permission</label>
+                    <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="modal-select">
+                       <option value="false">🔒 Blocked (Default)</option>
+                       <option value="true">🔓 Allowed</option>
+                    </select>
+                 </div>
               </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="flex justify-end gap-3 mt-8">
                  <button onClick={() => setShowAddModal(false)} className="btn btn-ghost">Cancel</button>
                  <button onClick={handleCreateUser} className="btn btn-primary">Create User</button>
               </div>
