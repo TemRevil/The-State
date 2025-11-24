@@ -1,0 +1,5 @@
+{
+  "name": "The State",
+  "description": "A minimalist, high-security login interface featuring strict numeric input validation.",
+  "requestFramePermissions": []
+}

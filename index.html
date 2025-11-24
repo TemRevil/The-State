@@ -1,211 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <title>The State - M.E.T</title>
-
-    <!-- Google Fonts: Rubik, Exo, Cairo, Tajawal (all weights) -->
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@100;200;300;400;500;600;700;800;900&family=Exo:wght@100;200;300;400;500;600;700;800;900&family=Cairo:wght@100;200;300;400;500;600;700;800;900&family=Tajawal:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="CSS/Revil.css">
-    <link rel="stylesheet" href="CSS/main.css">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The State</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
 </head>
-<body class="flex col">
-    <div class="def-wall off"></div>
-    <div class="stage" aria-hidden="true" data-blob-speed="1" data-blob-opacity="0.8" data-blob-count="5" data-blob-blur="90px">
-        <div class="blobs">
-            <div class="blob b1" id="blob1"></div>
-            <div class="blob b2" id="blob2"></div>
-            <div class="blob b3" id="blob3"></div>
-        </div>
-    </div>
-    <div class="blocked-view w-[100%] h-[100vh] flex center off">
-        <p class="title">Blocked Snitch!</p>
-    </div>
-    <section class="permissions flex col center gap-[20px] off">
-        <p class="title">Permissions Required</p>
-        <div class="perm-item flex row j-between a-center w-[100%] max-w-[400px] pd-[15px] bg-blur br-[10px]">
-            <div class="flex col">
-                <p class="text-1">Notifications</p>
-                <p class="text-2 op-[0.6]">Allow notifications for updates</p>
-            </div>
-            <button class="perm-btn text" id="notif-btn">Allow</button>
-        </div>
-        <div class="perm-item flex row j-between a-center w-[100%] max-w-[400px] pd-[15px] bg-blur br-[10px]">
-            <div class="flex col">
-                <p class="text-1">Clipboard Access</p>
-                <p class="text-2 op-[0.6]">Allow copying to clipboard</p>
-            </div>
-            <button class="perm-btn text" id="clip-btn">Allow</button>
-        </div>
-        <button class="next-btn text off" id="next-btn" onclick="location.reload()">Next</button>
-    </section>
-    <div class="loader w-[100%] h-[100vh] flex center off">
-        <div class="book-l">
-            <div>
-                <ul>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                    <li><svg fill="currentColor" viewBox="0 0 90 120"><path d="M90,0 L90,120 L11,120 C4.92486775,120 0,115.075132 0,109 L0,11 C0,4.92486775 4.92486775,0 11,0 L90,0 Z M71.5,81 L18.5,81 C17.1192881,81 16,82.1192881 16,83.5 C16,84.8254834 17.0315359,85.9100387 18.3356243,85.9946823 L18.5,86 L71.5,86 C72.8807119,86 74,84.8807119 74,83.5 C74,82.1745166 72.9684641,81.0899613 71.6643757,81.0053177 L71.5,81 Z M71.5,57 L18.5,57 C17.1192881,57 16,58.1192881 16,59.5 C16,60.8254834 17.0315359,61.9100387 18.3356243,61.9946823 L18.5,62 L71.5,62 C72.8807119,62 74,60.8807119 74,59.5 C74,58.1192881 72.8807119,57 71.5,57 Z M71.5,33 L18.5,33 C17.1192881,33 16,34.1192881 16,35.5 C16,36.8254834 17.0315359,37.9100387 18.3356243,37.9946823 L18.5,38 L71.5,38 C72.8807119,38 74,36.8807119 74,35.5 C74,34.1192881 72.8807119,33 71.5,33 Z"></path></svg></li>
-                </ul>
-            </div>
-            <span class="text">Loading</span>
-        </div>
-    </div>
-    <section class="login flex col center gap-[10px] off">
-        <p class="title">Log In</p>
-        <div class="input-group">
-            <input required="true" type="text" name="text" autocomplete="off" class="input text" placeholder=" " maxlength="11" pattern="[0-9]{11}" inputmode="numeric" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
-            <label class="user-label text">Number</label>
-        </div>
-        <div class="input-group off">
-            <input required="true" id="api-key-input" type="text" name="text" autocomplete="off" class="input text" placeholder=" ">
-            <button type="button" class="copy-btn" aria-label="Copy API key" title="Copy API key" id="copy-api-btn">
-                <img src="Assets/icon/Copy.png" alt="Copy" />
-            </button>
-            <label class="user-label text">Api Secret Key</label>
-        </div>
-        <div class="input-group off">
-            <input required="true" id="name-input" type="text" name="text" autocomplete="off" class="input text" placeholder=" ">
-            <button type="button" class="create-btn" aria-label="Create account" title="Create account" id="create-btn">
-                Create
-            </button>
-            <label class="user-label text">Name</label>
-        </div>
-        <div class="login-actions off">
-            <label class="remember-toggle">
-                <input type="checkbox" id="remember-me" checked>
-                <span class="toggle-slider"></span>
-                <span class="toggle-label text">Remember Me</span>
-            </label>
-            <button class="one-btn text" id="login">Login</button>
-        </div>
-    </section>
-    <section class="header flex row off">
-        <div id="user-box" class="user-box flex col">
-            <div class="img-box">
-                <div class="flex center text" style="width: 100%;"></div>
-            </div>
-            <span class="text off" id="username" style="padding: 10px;"></span>
-            <span class="text off" id="user-number" style="padding: 10px;"></span>
-            <button class="two-btn off" id="to-dashboard">Action Center</button>
-            <button class="two-btn off" id="logout">Logout</button>
-        </div>
-        <p class="title">The State</p>
-    </section>
-    <section class="main-content flex row off">
-        <div class="aside flex col a-center gap-[10px]">
-            <button class="weekly-aside align">Weeks</button>
-            <!-- <div class="align active">الاسبوع 1</div> -->
-        </div>
-        <div class="content" data-week="1">
-            <!-- <div class="pdf-box flex col" data-name="Lecture-1" data-lect-locate="pdf_url" data-date="1st feb 2025" data-size="1.32mb"></div> -->
-        </div>
-    </section>
-    <section class="pdf-viewer flex center off">
-        <button class="close-pdf-btn"><svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="50" height="50" viewBox="0,0,255.99599,255.99599"><g fill="#ffffff" fill-rule="nonzero" stroke="none" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-dasharray="" stroke-dashoffset="0" font-family="none" font-weight="none" font-size="none" text-anchor="none" style="mix-blend-mode: normal"><g transform="scale(5.12,5.12)"><path d="M7.71875,6.28125l-1.4375,1.4375l17.28125,17.28125l-17.28125,17.28125l1.4375,1.4375l17.28125,-17.28125l17.28125,17.28125l1.4375,-1.4375l-17.28125,-17.28125l17.28125,-17.28125l-1.4375,-1.4375l-17.28125,17.28125z"></path></g></g></svg></button>
-        <iframe src="" frameborder="0" class="pdf-frame"></iframe>
-    </section>
-    <button id="quiz-trigger" class="quizi quiz-floating-btn flex center">
-        <img src="Assets/icon/quiz.png" alt="Quiz">
-    </button>
-    <section id="quiz-modal" class="quiz-overlay flex center off">
-        <div class="quiz-card">
-            <div class="quiz-header flex row j-between a-center">
-                <h2 id="quiz-title" class="align">إعدادات الكويز</h2>
-                <button id="close-quiz" class="icon-btn flex center">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-            </div>
-            <div class="quiz-body">
-                <div id="view-setup" class="quiz-view">
-                    <div id="subject-tabs" class="tabs-container">
-                        <div class="text-1 op-[0.5]">جاري التحميل...</div>
-                    </div>
-                    <div class="pdf-selection-container">
-                        <p class="text-1 op-[0.7]">اختر المحاضرات:</p>
-                        <div id="pdf-list" class="pdf-list-box">
-                            <div class="empty-state text-1 op-[0.5] text-center mt-[20px]">اختر مادة أولاً</div>
-                        </div>
-                    </div>
-                    <div class="settings-container">
-                        <div class="setting-row">
-                            <p class="text-1">عدد الأسئلة: <span id="lbl-count" class="val cl-[var(--pc)]">10</span></p>
-                            <input type="range" id="inp-count" min="5" max="15" value="10" class="revil-range">
-                        </div>
-                        <div class="setting-row">
-                            <p class="text-1">الوقت: <span id="lbl-timer" class="val cl-[var(--pc)]">5د</span></p>
-                            <input type="range" id="inp-timer" min="2" max="10" value="5" class="revil-range">
-                        </div>
-                        <div class="setting-row">
-                            <p class="text-1">الاختيارات: <span id="lbl-choices" class="val cl-[var(--pc)]">4</span></p>
-                            <input type="range" id="inp-choices" min="3" max="5" value="4" class="revil-range">
-                        </div>
-                    </div>
-                    <button id="btn-start" class="action-btn text">بدء الاختبار</button>
-                </div>
-                <div id="view-active" class="quiz-view off">
-                    <div class="game-bar">
-                        <div class="flex row a-center gap-[5px]">
-                            <span class="text-1">⏳</span>
-                            <span id="quiz-timer" class="text-1 font-mono">05:00</span>
-                        </div>
-                        <div class="flex row a-center gap-[5px]">
-                            <span id="q-curr" class="text-1 cl-[var(--pc)] font-mono">1</span>
-                            <span class="text-1">/</span>
-                            <span id="q-total" class="text-1 font-mono">10</span>
-                        </div>
-                    </div>
-
-                    <div class="question-container">
-                        <p id="q-text">...</p>
-                    </div>
-
-                    <div id="choices-area" class="choices-container"></div>
-
-                    <div class="nav-bar">
-                        <button id="btn-prev" class="nav-btn text-1" disabled>السابق</button>
-                        <button id="btn-next" class="nav-btn primary text-1">التالي</button>
-                    </div>
-                </div>
-                <div id="view-result" class="quiz-view off flex col a-center">
-                    <p class="align mb-[10px]">النتيجة النهائية</p>
-                    <div class="score-wrapper">
-                        <svg viewBox="0 0 36 36" class="circular-chart">
-                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path id="score-circle" class="circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                        </svg>
-                        <span id="score-val" class="score-text">0%</span>
-                    </div>
-
-                    <div id="review-list" class="review-list-box"></div>
-
-                    <button id="btn-restart" class="action-btn text mt-[10px]">إعادة الاختبار</button>
-                </div>
-            </div>
-        </div>
-    </section>
-    <div class="to-dashboard-modal flex center off">
-        <div class="to-dashboard-content flex row center gap-[20px]">
-            <button id="close-dashboard-modal" class="close-btn text"><svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="50" height="50" viewBox="0,0,255.99599,255.99599"><g fill="#ffffff" fill-rule="nonzero" stroke="none" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-dasharray="" stroke-dashoffset="0" font-family="none" font-weight="none" font-size="none" text-anchor="none" style="mix-blend-mode: normal"><g transform="scale(5.12,5.12)"><path d="M7.71875,6.28125l-1.4375,1.4375l17.28125,17.28125l-17.28125,17.28125l1.4375,1.4375l17.28125,-17.28125l17.28125,17.28125l1.4375,-1.4375l-17.28125,-17.28125l17.28125,-17.28125l-1.4375,-1.4375l-17.28125,17.28125z"></path></g></g></svg></button>
-            <img src="Assets/user/1.jpg" alt="Dashboard" class="user-img">
-            <div class="hr-line"></div>
-            <div class="flex col gap-[15px]">
-                <div class="flex col">
-                    <p class="align">Going to Action Center?</p>
-                    <p class="text-1 op-[0.5]">Getting in while it's none of your business, will cause you trouble!</p>
-                </div>
-                <input type="password" id="dashboard-password" placeholder="Enter password" class="input text fs-[18px]">
-                <button id="submit-dashboard" class="two-btn rd-[15px]">Login</button>
-            </div>
-        </div>
-    </div>
-    <script type="module" src="JavaScript/firebase.js"></script>
-    <script type="module" src="JavaScript/main.js"></script>
-    <script type="module" src="JavaScript/Revil.js"></script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+  <script type="module" src="/index.tsx"></script>
 </body>
 </html>
