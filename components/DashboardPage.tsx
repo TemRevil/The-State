@@ -5,6 +5,7 @@ import { ref, listAll, getMetadata, getDownloadURL, uploadBytes } from 'firebase
 import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
+import { PDFViewer } from './PDFViewer';
 
 interface PDFFile { name: string; url: string; date: string; size: string; }
 interface DashboardPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
@@ -291,57 +292,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
         </div>
       </main>
 
-      {/* VIEWER MODAL */}
-      {selectedPdf && (
-        <div onContextMenu={(e) => e.preventDefault()} className="modal-overlay animate-fade-in select-none">
-          {violation ? (
-             <div className="modal-content modal-md p-8 flex flex-col items-center text-center border border-error/50 relative overflow-hidden bg-[#09090b] shadow-[0_0_50px_rgba(239,68,68,0.2)]">
-                <div className="absolute inset-0 bg-red-900/10 animate-pulse pointer-events-none"></div>
-                
-                <div className="relative w-24 h-24 rounded-full bg-error/10 flex items-center justify-center mb-6 text-error shadow-[0_0_30px_rgba(239,68,68,0.3)] animate-bounce">
-                    <ShieldAlert size={48} />
-                </div>
-                
-                <h2 className="relative text-3xl font-bold text-white mb-2 tracking-tight">Security Alert</h2>
-                <p className="relative text-error font-bold text-lg mb-6 uppercase tracking-widest">Screenshot Detected</p>
-                
-                <div className="relative bg-white/5 border border-white/10 rounded-lg p-4 mb-8 w-full">
-                  <p className="text-muted text-sm leading-relaxed">
-                     A security violation has been logged against your ID <strong>{localStorage.getItem("Number")}</strong>.
-                     <br/><br/>
-                     This incident has been reported to the administrator. Repeated violations will result in an immediate permanent ban.
-                  </p>
-                </div>
-                
-                <button 
-                  onClick={() => { setSelectedPdf(null); setViolation(false); }} 
-                  className="relative btn btn-danger w-full justify-center font-bold"
-                >
-                   Close & Acknowledge
-                </button>
-             </div>
-          ) : (
-            <div className="modal-content modal-xl relative flex flex-col">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-surface z-10">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary"><FileText size={18} /></div>
-                  <h3 className="font-semibold text-white">{selectedPdf.name}</h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  {canDownload && (
-                    <a href={selectedPdf.url} download={selectedPdf.name} target="_blank" rel="noreferrer" className="btn-icon"><Download size={20} /></a>
-                  )}
-                  <button onClick={() => setSelectedPdf(null)} className="btn-icon hover:text-white"><X size={20} /></button>
-                </div>
-              </div>
-              
-              <div className="flex-1 bg-black relative overflow-hidden flex flex-col">
-                <iframe src={`${selectedPdf.url}#toolbar=0&navpanes=0&scrollbar=0`} className="w-full h-full flex-1 relative z-10" title="Protected Document" sandbox="allow-scripts allow-same-origin" style={{ border: 'none' }} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* PDF VIEWER COMPONENT */}
+      <PDFViewer
+        pdf={selectedPdf}
+        onClose={() => { setSelectedPdf(null); setViolation(false); }}
+        violation={violation}
+        onViolation={() => setViolation(true)}
+        canDownload={canDownload}
+      />
 
       {/* FOCUS LOST BLOCKER WALL */}
       {isFocusLost && (

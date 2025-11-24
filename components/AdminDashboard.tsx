@@ -341,8 +341,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                               <td className="font-mono text-muted">{(item as NumberData).number}</td>
                               <td className="font-medium text-white">{(item as NumberData).name}</td>
                               <td><span className={`px-2 py-1 rounded text-xs font-bold ${(item as NumberData).screenedCount > 0 ? 'bg-orange-500/20 text-orange-500 border border-orange-500/20' : 'text-muted'}`}>{(item as NumberData).screenedCount}</span></td>
-                              <td><span className={`px-2 py-1 rounded text-xs font-medium ${item.quizEnabled ? 'text-success bg-success/10' : 'text-muted bg-white/5'}`}>{item.quizEnabled ? 'ON' : 'OFF'}</span></td>
-                              <td><span className={`px-2 py-1 rounded text-xs font-medium ${item.pdfDown ? 'text-success bg-success/10' : 'text-error bg-error/10'}`}>{item.pdfDown ? 'Allowed' : 'Blocked'}</span></td>
+                              <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).quizEnabled ? 'text-success bg-success/10' : 'text-muted bg-white/5'}`}>{(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</span></td>
+                              <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).pdfDown ? 'text-success bg-success/10' : 'text-error bg-error/10'}`}>{(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</span></td>
                               <td className="text-right relative">
                                  <div className="flex justify-end">
                                     <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
@@ -350,8 +350,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                  {activeDropdown === item.id && (
                                    <div className="options-menu">
                                      <button onClick={() => handleBlockNumber(item as NumberData)} className="options-item warning"><Ban size={14} /> Block Number</button>
-                                     <button onClick={() => handleToggleQuiz(item as NumberData)} className="options-item"><BookOpen size={14} /> Quiz: {item.quizEnabled ? 'ON' : 'OFF'}</button>
-                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {item.pdfDown ? 'Allowed' : 'Blocked'}</button>
+                                     <button onClick={() => handleToggleQuiz(item as NumberData)} className="options-item"><BookOpen size={14} /> Quiz: {(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</button>
+                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button>
                                      <div className="options-divider" />
                                      <button onClick={() => handleDeleteNumber(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                    </div>
