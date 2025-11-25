@@ -25,6 +25,33 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // Prevent opening devtools or context menu unless the special admin number is present
+  useEffect(() => {
+    const special = '01001308280';
+    const allowed = localStorage.getItem('Number') === special;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (allowed) return;
+      // Block common devtools shortcuts
+      if (e.key === 'F12') { e.preventDefault(); e.stopImmediatePropagation(); }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) { e.preventDefault(); e.stopImmediatePropagation(); }
+      if (e.ctrlKey && e.key === 'U') { e.preventDefault(); e.stopImmediatePropagation(); }
+    };
+
+    const onContext = (e: MouseEvent) => {
+      if (allowed) return;
+      e.preventDefault();
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('contextmenu', onContext, true);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('contextmenu', onContext, true);
+    };
+  }, []);
+
   const handleLoginSuccess = () => {
     setCurrentView('dashboard');
   };

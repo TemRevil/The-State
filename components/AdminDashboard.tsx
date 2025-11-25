@@ -10,14 +10,17 @@ interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; }
 interface BlockedData { id: string; number: string; name: string; reason: string; date: string; time: string; }
 interface SnitchData { id: string; loginNumber: string; snitchNumber: string; snitchName: string; date: string; time: string; }
+interface BrokerData { id: string; number: string; date: string; time: string; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots'>('tables');
-  const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches'>('numbers');
+   const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
+   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [numbers, setNumbers] = useState<NumberData[]>([]);
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
   const [snitches, setSnitches] = useState<SnitchData[]>([]);
+   const [brokers, setBrokers] = useState<BrokerData[]>([]);
   const [adminName, setAdminName] = useState('Admin');
   
   // Files State
@@ -56,7 +59,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   }, []);
 
   // --- DATA WATCHERS ---
-  useEffect(() => {
+   useEffect(() => {
     // Admin Name & Settings
     getDoc(doc(db, "Dashboard", "Admin")).then(s => s.exists() && setAdminName(s.data().Name || 'Admin'));
     getDoc(doc(db, "Dashboard", "Settings")).then(s => s.exists() && (setGlobalQuiz(s.data()["Quiz-Enabled"]), setGlobalPdf(s.data()["PDF-Down"])));
@@ -86,7 +89,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         })));
     });
     
-    const u3 = onSnapshot(collection(db, "Snitches"), s => {
+   const u3 = onSnapshot(collection(db, "Snitches"), s => {
         setSnitches(s.docs.map(d => ({ 
             id: d.id, 
             loginNumber: d.data()["The Login Number"], 
@@ -96,8 +99,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
             time: d.data()["Snitched Time"] 
         })));
     });
+   const u4 = onSnapshot(collection(db, "Brokers"), s => {
+      setBrokers(s.docs.map(d => ({ id: d.id, number: d.data().Number || 'Unknown', date: d.data().Date || '', time: d.data().Time || '' })));
+   });
 
-    return () => { u1(); u2(); u3(); };
+      return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const handleLogout = async () => { if (confirm("Logout?")) { await signOut(auth); window.location.reload(); } };
@@ -199,9 +205,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   };
 
   // Filtering
-  const filteredNumbers = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
-  const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
-  const filteredSnitches = snitches.filter(s => s.loginNumber?.includes(searchTerm) || s.snitchNumber?.includes(searchTerm));
+   const filteredNumbers = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
+   const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
+   const filteredSnitches = snitches.filter(s => s.loginNumber?.includes(searchTerm) || s.snitchNumber?.includes(searchTerm));
+   const filteredBrokers = brokers.filter(b => b.number?.includes(searchTerm));
 
   // --- FILES LOGIC ---
   const loadFiles = async (path: string) => {
@@ -269,13 +276,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   // --- SHOTS LOGIC ---
   const loadShots = async () => { try { const r = await listAll(ref(storage, 'Captured-Shots')); setShots(await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name })))); } catch {} };
-  useEffect(() => { if (activeSection === 'shots') loadShots(); }, [activeSection]);
+   const loadShotsWithOwners = async () => {
+      try {
+         const r = await listAll(ref(storage, 'Captured-Shots'));
+         const raw = await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name })));
+         // Parse owner number from filename like Shot_<number>_<ts>.png
+         const enhanced = await Promise.all(raw.map(async (s) => {
+            const parts = s.name.split('_');
+            const ownerNum = parts.length >= 2 ? parts[1] : 'Unknown';
+            let ownerName = 'Unknown';
+            try {
+               const d = await getDoc(doc(db, 'Numbers', ownerNum));
+               if (d.exists()) ownerName = d.data().Name || 'Unknown';
+            } catch {}
+            return { ...s, ownerNumber: ownerNum, ownerName };
+         }));
+         setShots(enhanced as any[]);
+      } catch (e) { console.warn('Load shots failed', e); }
+   };
+   useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
   const handleDeleteShot = async () => { if (confirm("Delete?")) try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch {} };
 
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       {/* SIDEBAR */}
-      <aside className="sidebar z-20 shadow-xl">
+      <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header gap-3">
           <div className="rounded border border-indigo-900/50 flex items-center justify-center text-indigo-500 bg-indigo-500/10" style={{ width: '32px', height: '32px' }}><ShieldAlert size={18} /></div>
           <div><h1 className="font-bold text-white text-sm">The State</h1><p className="text-muted uppercase text-[10px] tracking-wider">System Control</p></div>
@@ -291,10 +316,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </div>
       </aside>
 
+      {/* Mobile backdrop to close sidebar when clicking outside */}
+      {sidebarOpen && <div className="mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* MAIN */}
       <main className="main-content">
         <header className="content-header">
            <div className="flex items-center gap-3">
+                   <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
               <div className="rounded-full bg-surface border border-white/10 flex items-center justify-center text-muted font-bold text-xs" style={{ width: '36px', height: '36px' }}>{adminName.charAt(0).toUpperCase()}</div>
               <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName}</h2><p className="text-xs text-success">Online</p></div>
            </div>
@@ -308,7 +337,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               {/* TABLE TOOLBAR */}
               <div className="table-toolbar">
                  <div className="table-nav">
-                   {['numbers', 'blocked', 'snitches'].map((tab) => (
+                   {['numbers', 'blocked', 'snitches', 'brokers'].map((tab) => (
                      <button 
                        key={tab} 
                        onClick={() => setActiveTableTab(tab as any)} 
@@ -331,12 +360,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 <div className="absolute inset-0 overflow-auto custom-scrollbar">
                   <table className="admin-table">
                     <thead>
-                      <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Screened</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th className="text-right">Actions</th></>) : (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th className="text-right">Actions</th></>)}</tr>
+                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Screened</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Date</th><th>Time</th><th className="text-right">Actions</th></>)}</tr>
                     </thead>
                     <tbody>
-                      {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : filteredSnitches).map((item) => (
+                                 {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
                         <tr key={item.id}>
-                          {activeTableTab === 'numbers' && (
+                                       {activeTableTab === 'numbers' && (
                             <>
                               <td className="font-mono text-muted">{(item as NumberData).number}</td>
                               <td className="font-medium text-white">{(item as NumberData).name}</td>
@@ -394,6 +423,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                          <button onClick={() => handleBlockSnitch(item as SnitchData)} className="options-item warning"><Ban size={14} /> Block Snitch</button>
                                          <div className="options-divider" />
                                          <button onClick={() => handleDeleteSnitch(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
+                                      </div>
+                                   )}
+                                </td>
+                             </>
+                          )}
+                          {activeTableTab === 'brokers' && (
+                             <>
+                                <td className="font-mono text-muted">{(item as BrokerData).number}</td>
+                                <td className="text-sm text-white">{(item as BrokerData).date}</td>
+                                <td className="text-xs text-muted">{(item as BrokerData).time}</td>
+                                <td className="text-right relative">
+                                   <div className="flex justify-end">
+                                      <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
+                                   </div>
+                                   {activeDropdown === item.id && (
+                                      <div className="options-menu" style={{ width: '160px' }}>
+                                         <button onClick={async () => { if (confirm('Delete record?')) { await deleteDoc(doc(db, 'Brokers', (item as BrokerData).id)); setActiveDropdown(null); } }} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                       </div>
                                    )}
                                 </td>
@@ -500,7 +546,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                          <button onClick={() => setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1))} className="absolute right-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full"><ArrowRight /></button>
                       </div>
                       <div className="flex justify-between items-center bg-surface p-4 rounded-xl border border-white/10">
-                         <span className="text-sm font-mono text-muted">{shots[currentShotIndex]?.name}</span>
+                         <div>
+                           <div className="text-sm font-mono text-muted">{shots[currentShotIndex]?.name}</div>
+                           <div className="text-xs text-muted">Owner: <span className="text-white">{shots[currentShotIndex]?.ownerName || 'Unknown'}</span> <span className="font-mono text-muted">({shots[currentShotIndex]?.ownerNumber || 'Unknown'})</span></div>
+                         </div>
                          <div className="flex gap-4 items-center">
                             <span className="text-sm text-muted">{currentShotIndex + 1} / {shots.length}</span>
                             <button onClick={handleDeleteShot} className="btn btn-danger h-8 text-xs px-3">Delete</button>
@@ -577,7 +626,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                  </div>
               </div>
               <div className="flex justify-end">
-                 <button onClick={() => setShowSettingsModal(false)} className="btn btn-primary">Save Changes</button>
+                 <button onClick={async () => {
+                     try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); }
+                     catch (e) { console.warn('Failed to save settings', e); }
+                     setShowSettingsModal(false);
+                 }} className="btn btn-primary">Save Changes</button>
               </div>
            </div>
         </div>

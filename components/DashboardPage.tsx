@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { storage, auth, db } from '../firebaseConfig';
 import { ref, listAll, getMetadata, uploadBytes } from 'firebase/storage';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
 import { PDFViewer } from './PDFViewer';
@@ -19,6 +19,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
   const [loadingPDFs, setLoadingPDFs] = useState(false);
   const [userName, setUserName] = useState('');
   const [canDownload, setCanDownload] = useState(false);
+  const [globalPdfSetting, setGlobalPdfSetting] = useState<boolean | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedPdf, setSelectedPdf] = useState<PDFFile | null>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -32,15 +34,46 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
   useEffect(() => {
     setUserName(localStorage.getItem("Name") || "User");
     loadWeeks();
-    const checkPerms = async () => {
+     const checkPerms = async () => {
        const num = localStorage.getItem("Number");
+       try {
+         const s = await getDoc(doc(db, "Dashboard", "Settings"));
+         const globalPdf = s.exists() ? (s.data()["PDF-Down"] === true) : null;
+         setGlobalPdfSetting(globalPdf);
+         if (globalPdf === true) {
+          // Global override allows downloads for everyone
+          setCanDownload(true);
+          return;
+         }
+       } catch (e) { console.warn('Could not read global PDF settings', e); }
+
        if (!num) return;
        try {
-          const s = await getDoc(doc(db, "Numbers", num));
-          if (s.exists()) setCanDownload(s.data()["PDF-Down"] === true);
-       } catch {}
-    };
+         const s = await getDoc(doc(db, "Numbers", num));
+         if (s.exists()) setCanDownload(s.data()["PDF-Down"] === true);
+       } catch (e) { console.warn('Could not read per-number PDF setting', e); }
+     };
     checkPerms();
+  }, []);
+
+  // Listen to global settings changes so download permission updates live
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(doc(db, 'Dashboard', 'Settings'), (snap) => {
+        if (snap.exists()) {
+          const globalPdf = snap.data()['PDF-Down'];
+          setGlobalPdfSetting(globalPdf === true);
+          if (globalPdf === true) setCanDownload(true);
+          else {
+            // re-evaluate per-number
+            const num = localStorage.getItem('Number');
+            if (!num) { setCanDownload(false); return; }
+            getDoc(doc(db, 'Numbers', num)).then(s => { if (s.exists()) setCanDownload(s.data()['PDF-Down'] === true); else setCanDownload(false); }).catch(() => {});
+          }
+        }
+      });
+      return () => unsub();
+    } catch (e) { }
   }, []);
 
   useEffect(() => { if (activeWeek) loadWeekPDFs(activeWeek); }, [activeWeek]);
@@ -190,16 +223,42 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
     setAdminLoading(true); setAdminError('');
     try {
       const c = await signInWithEmailAndPassword(auth, "temrevil+1@gmail.com", adminPassword);
-      if (ALLOWED_ADMIN_UIDS.includes(c.user.uid)) { setShowAdminLogin(false); setAdminPassword(''); onNavigateAdmin(); }
-      else throw new Error();
-    } catch { setAdminError('Access Denied'); } finally { setAdminLoading(false); }
+      // Allow if email matches or UID is in allowed list
+      if (c.user.email === 'temrevil+1@gmail.com' || ALLOWED_ADMIN_UIDS.includes(c.user.uid)) {
+        setShowAdminLogin(false); setAdminPassword(''); onNavigateAdmin();
+      } else {
+        throw new Error('Access Denied');
+      }
+    } catch (err) { setAdminError('Access Denied'); recordFailedLoginAttempt(); } finally { setAdminLoading(false); }
+  };
+  
+  // Record failed admin login attempts to Firestore (/Dashboard/Failed Login and collection Brokers)
+  const recordFailedLoginAttempt = async () => {
+    try {
+      const num = localStorage.getItem('Number') || 'Unknown';
+      const now = new Date();
+      // Increment counter on Dashboard/Failed Login
+      try {
+        await updateDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: increment(1) });
+      } catch (e) {
+        try { await setDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: 1 }); } catch (er) { }
+      }
+      // Add individual broker record
+      try {
+        await setDoc(doc(db, 'Brokers', `Attempt ${Date.now()}`), {
+          Date: now.toLocaleDateString('en-GB'),
+          Time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+          Number: num
+        });
+      } catch (e) { console.warn('Failed to write broker record', e); }
+    } catch (e) { console.warn('Failed to record failed login', e); }
   };
 
   return (
     <div className="flex flex-row h-screen w-full select-none overflow-hidden bg-app-base">
       
       {/* SIDEBAR */}
-      <aside className="sidebar z-20 shadow-lg">
+      <aside className={`sidebar z-20 shadow-lg ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header">
           <div className="flex items-center gap-3">
             <div className="rounded-lg flex items-center justify-center text-white bg-surface border border-white/10" style={{ width: '36px', height: '36px' }}>
@@ -250,12 +309,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
         </div>
       </aside>
 
+      {/* Mobile backdrop to close sidebar when clicking outside */}
+      {sidebarOpen && <div className="mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* MAIN CONTENT */}
       <main className="main-content">
         <header className="content-header">
-          <div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
+            <div>
             <h2 className="text-2xl font-bold text-white">{activeWeek || 'Loading...'}</h2>
             <p className="text-sm text-muted">Document Repository</p>
+            </div>
           </div>
         </header>
 
@@ -303,8 +368,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
       {/* FOCUS LOST BLOCKER WALL */}
       {isFocusLost && (
         <div 
-          className="fixed inset-0 z-[99999] flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" 
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 50 }}
+          className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" 
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200000 }}
         >
           <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-6 shadow-glow">
              <EyeOff size={48} className="text-muted" />
