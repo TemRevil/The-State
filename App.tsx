@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import './components/arabicFontDetector.js';
 import { LoginPage } from './components/LoginPage';
 import { DashboardPage } from './components/DashboardPage';
 import { AdminDashboard } from './components/AdminDashboard';
