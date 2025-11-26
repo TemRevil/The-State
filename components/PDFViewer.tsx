@@ -5,8 +5,8 @@ import { ref, getBytes } from 'firebase/storage';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 
 // Serve the worker from the local `public/` folder (copied from `node_modules/pdfjs-dist/build`)
-// Vite will expose `public/pdf.worker.min.mjs` at `/pdf.worker.min.mjs`
-GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+// Vite will expose `public/pdf.worker.min.mjs` at `/The-State/pdf.worker.min.mjs`
+GlobalWorkerOptions.workerSrc = 'pdf.worker.min.mjs';
 
 interface PDFViewerProps {
   pdf: { name: string; url: string; date: string; size: string; path: string } | null;
