@@ -52,7 +52,7 @@ const App: React.FC = () => {
     // Fetch storedNumber right before checking for interval setup
     const currentStoredNumberAtEffectRun = localStorage.getItem("Number")?.trim();
     if (currentStoredNumberAtEffectRun !== special) {
-      intervalId = setInterval(() => {
+      intervalId = window.setInterval(() => {
         const startTime = performance.now();
         debugger;
         const endTime = performance.now();
