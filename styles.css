@@ -1,5 +1,5 @@
 
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Cairo:wght@400;600;700&family=Noto+Sans+Arabic:wght@400;600;700&display=swap');
 
 :root {
   /* --- PALETTE (Ron Design) --- */
@@ -45,6 +45,7 @@
 
   --font-body: 'Outfit', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+  --font-arabic: 'Cairo', 'Noto Sans Arabic', sans-serif;
   
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -165,6 +166,7 @@ button, input { font-family: inherit; font-size: inherit; }
 .text-2xl { font-size: 1.5rem; font-weight: 700; }
 .text-3xl { font-size: 1.875rem; font-weight: 700; }
 .font-mono { font-family: var(--font-mono); }
+.font-arabic { font-family: var(--font-arabic); }
 .font-bold { font-weight: 700; }
 .font-medium { font-weight: 500; }
 .text-center { text-align: center; }
@@ -231,8 +233,8 @@ button, input { font-family: inherit; font-size: inherit; }
 .btn-ghost { background-color: transparent; color: var(--color-text-muted); }
 .btn-ghost:hover:not(:disabled) { background-color: rgba(255, 255, 255, 0.05); color: var(--color-text-main); }
 
-.btn-icon { width: 36px; height: 36px; padding: 0; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); transition: all 0.2s; background: transparent; border: none; cursor: pointer; }
-.btn-icon:hover { background-color: var(--color-surface-hover); color: var(--color-text-main); }
+.btn-icon { width: 40px; height: 40px; padding: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); transition: all 0.15s ease; background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.06); cursor: pointer; }
+.btn-icon:hover { background-color: var(--color-surface-hover); color: var(--color-text-main); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
 
 /* Inputs */
 .login-input {
@@ -300,6 +302,26 @@ button, input { font-family: inherit; font-size: inherit; }
 
   /* Mobile header toggle button spot */
   .mobile-toggle { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; background: rgba(255,255,255,0.02); border: 1px solid var(--color-border); color: var(--color-text-muted); }
+
+  .table-nav-desktop { display: none; }
+  .table-nav-mobile { display: block; }
+  .table-nav-mobile .table-nav-btn {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    padding: 8px 12px;
+  }
+  .search-container {
+    width: 100%;
+    order: -1; /* Move search to the top on mobile */
+    margin-bottom: 16px;
+  }
+  .table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 @media (min-width: 901px) {
@@ -406,24 +428,7 @@ button, input { font-family: inherit; font-size: inherit; }
   background-color: rgba(38, 132, 252, 0.08);
 }
 
-/* Admin modal close button — elevated pill style */
-.modal-close-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 130000;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-  border: 1px solid rgba(255,255,255,0.06);
-  color: var(--color-text-muted);
-  transition: all 0.15s ease;
-}
-.modal-close-btn:hover { transform: translateY(-2px); color: var(--color-text-main); box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
+
 
 /* File action responsive behavior */
 .file-download-desktop { display: inline-flex; }

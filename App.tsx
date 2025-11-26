@@ -28,25 +28,50 @@ const App: React.FC = () => {
   // Prevent opening devtools or context menu unless the special admin number is present
   useEffect(() => {
     const special = '01001308280';
-    const allowed = localStorage.getItem('Number') === special;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (allowed) return;
-      // Block common devtools shortcuts
-      if (e.key === 'F12') { e.preventDefault(); e.stopImmediatePropagation(); }
-      if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) { e.preventDefault(); e.stopImmediatePropagation(); }
-      if (e.ctrlKey && e.key === 'U') { e.preventDefault(); e.stopImmediatePropagation(); }
+      const storedNumber = localStorage.getItem("Number")?.trim();
+      if (storedNumber !== special) {
+        // Block common devtools shortcuts
+        if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) || (e.ctrlKey && e.key === 'U')) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      }
     };
 
     const onContext = (e: MouseEvent) => {
-      if (allowed) return;
-      e.preventDefault();
+      const storedNumber = localStorage.getItem("Number")?.trim();
+      if (storedNumber !== special) {
+        e.preventDefault();
+      }
     };
+
+    let intervalId: number | undefined;
+
+    // Fetch storedNumber right before checking for interval setup
+    const currentStoredNumberAtEffectRun = localStorage.getItem("Number")?.trim();
+    if (currentStoredNumberAtEffectRun !== special) {
+      intervalId = setInterval(() => {
+        const startTime = performance.now();
+        debugger;
+        const endTime = performance.now();
+        if (endTime - startTime > 100) {
+          // Devtools are likely open
+          console.clear();
+          // You could also redirect or blank the page
+          // window.location.href = 'about:blank';
+        }
+      }, 500);
+    }
 
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('contextmenu', onContext, true);
 
     return () => {
+      if (intervalId !== undefined) {
+        clearInterval(intervalId);
+      }
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('contextmenu', onContext, true);
     };

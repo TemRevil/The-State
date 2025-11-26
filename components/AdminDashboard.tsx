@@ -1,16 +1,15 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db, storage, auth } from '../firebaseConfig';
 import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
-import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown } from 'lucide-react';
 
 interface AdminDashboardProps { onBack: () => void; }
-interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; }
+interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
 interface BlockedData { id: string; number: string; name: string; reason: string; date: string; time: string; }
 interface SnitchData { id: string; loginNumber: string; snitchNumber: string; snitchName: string; date: string; time: string; }
-interface BrokerData { id: string; number: string; date: string; time: string; }
+interface BrokerData { id: string; number: string; count: number; date: string; time: string; attempts: { Date: string; Time: string; Password?: string; }[]; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
@@ -19,8 +18,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
    const [sidebarOpen, setSidebarOpen] = useState(false);
   const [numbers, setNumbers] = useState<NumberData[]>([]);
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
-  const [snitches, setSnitches] = useState<SnitchData[]>([]);
-   const [brokers, setBrokers] = useState<BrokerData[]>([]);
+     const [snitches, setSnitches] = useState<SnitchData[]>([]);
+     const [showNumberInfoModal, setShowNumberInfoModal] = useState(false);
+     const [selectedNumberForInfo, setSelectedNumberForInfo] = useState<NumberData | null>(null);
+     const [loginAttemptsData, setLoginAttemptsData] = useState<LoginAttempt[]>([]); // New state for login attempts
+
+  const [brokers, setBrokers] = useState<BrokerData[]>([]);
+  const [showBrokerInfoModal, setShowBrokerInfoModal] = useState(false);
+  const [selectedBrokerForInfo, setSelectedBrokerForInfo] = useState<BrokerData | null>(null);
   const [adminName, setAdminName] = useState('Admin');
   
   // Files State
@@ -37,6 +42,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [showTableNavMenu, setShowTableNavMenu] = useState(false);
+  const [showFileNavMenu, setShowFileNavMenu] = useState(false);
+  const tableNavRef = useRef<HTMLDivElement>(null);
+  const fileNavRef = useRef<HTMLDivElement>(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
   
   // Add User Inputs
   const [newNumber, setNewNumber] = useState('');
@@ -46,12 +56,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [globalQuiz, setGlobalQuiz] = useState(true);
   const [globalPdf, setGlobalPdf] = useState(true);
 
+  // Define an interface for a single login attempt to make the code more readable and type-safe
+  interface LoginAttempt {
+    attemptId: string;
+    deviceId: string;
+    Code: string;
+    Date: string;
+    Time: string;
+  }
+
   // Click Outside Handler for Dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       if (!target.closest('.options-menu') && !target.closest('.btn-icon')) {
         setActiveDropdown(null);
+      }
+      if (tableNavRef.current && !tableNavRef.current.contains(event.target as Node)) {
+        setShowTableNavMenu(false);
+      }
+      if (fileNavRef.current && !fileNavRef.current.contains(event.target as Node)) {
+        setShowFileNavMenu(false);
       }
     };
     document.addEventListener('click', handleClickOutside);
@@ -85,26 +110,96 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
             quizEnabled: d.data()["Quiz-Enabled"]??true, 
             pdfDown: d.data()["PDF-Down"]??true, 
             deviceCount: 0, 
-            screenedCount: d.data()["Screened"]||0 
-        })));
-    });
+                        screenedCount: d.data()["Screened"]||0,
+                        devices: d.data().Devices // This will be the top-level 'Devices' map
+                    })));    });
     
-   const u3 = onSnapshot(collection(db, "Snitches"), s => {
-        setSnitches(s.docs.map(d => ({ 
-            id: d.id, 
-            loginNumber: d.data()["The Login Number"], 
-            snitchNumber: d.data()["The Snitch"], 
-            snitchName: d.data().Name, 
-            date: d.data()["Snitched Date"], 
-            time: d.data()["Snitched Time"] 
-        })));
-    });
-   const u4 = onSnapshot(collection(db, "Brokers"), s => {
-      setBrokers(s.docs.map(d => ({ id: d.id, number: d.data().Number || 'Unknown', date: d.data().Date || '', time: d.data().Time || '' })));
+      const u3 = onSnapshot(collection(db, "Snitches"), async s => {
+           const snitchesData = await Promise.all(s.docs.map(async d => {
+               const snitchNum = d.data()["The Snitch"];
+               let fetchedSnitchName = "Unknown"; // Default name
+               if (snitchNum) {
+                   const numberDocRef = doc(db, "Numbers", snitchNum);
+                   const numberDocSnap = await getDoc(numberDocRef);
+                   if (numberDocSnap.exists()) {
+                       fetchedSnitchName = numberDocSnap.data().Name || "Unknown";
+                   }
+               }
+   
+               return {
+                   id: d.id,
+                   loginNumber: d.data()["The Login Number"],
+                   snitchNumber: snitchNum,
+                   snitchName: fetchedSnitchName,
+                   date: d.data()["Snitched Date"],
+                   time: d.data()["Snitched Time"]
+               };
+           }));
+           setSnitches(snitchesData);
+       });   const u4 = onSnapshot(collection(db, "Brokers"), s => {
+      setBrokers(s.docs.map(d => {
+        const data = d.data();
+        const attempts = (data.Attempts || []) as { Date: string; Time: string; Password?: string; }[];
+        const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : { Date: '', Time: '' };
+        return {
+          id: d.id,
+          number: data.Number || 'Unknown',
+          count: attempts.length, // Derive count from attempts array length
+          date: lastAttempt.Date,
+          time: lastAttempt.Time,
+          attempts: attempts, // Store full attempts array
+        };
+      }));
    });
 
       return () => { u1(); u2(); u3(); u4(); };
   }, []);
+
+  // Effect for window resize
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Effect to fetch login attempts when the modal is shown
+  useEffect(() => {
+    if (showNumberInfoModal && selectedNumberForInfo) {
+      const fetchLoginAttempts = async () => {
+        const attempts: LoginAttempt[] = [];
+        const numberDocRef = doc(db, 'Numbers', selectedNumberForInfo.number);
+        const numberDocSnap = await getDoc(numberDocRef);
+
+        if (numberDocSnap.exists()) {
+          const data = numberDocSnap.data();
+          
+          // --- NEW CONSOLE LOGS FOR DEBUGGING ---
+
+          // ------------------------------------
+          
+          if (data && typeof data === 'object' && data.devices && typeof data.devices === 'object' && data.devices.Archived && typeof data.devices.Archived === 'object') {
+            Object.keys(data.devices.Archived).forEach(attemptId => {
+              const attemptData = data.devices.Archived![attemptId];
+              if (attemptData && typeof attemptData === 'object') {
+                attempts.push({
+                  attemptId: attemptId,
+                  deviceId: attemptId, // Use attemptId as deviceId for display
+                  Code: attemptData.Code || 'N/A',
+                  Date: attemptData.Date || 'N/A',
+                  Time: attemptData.Time || 'N/A',
+                });
+              }
+            });
+          }
+        }
+        // Sort attempts, e.g., by attemptId (which is a timestamp string)
+        setLoginAttemptsData(attempts.sort((a, b) => (b.attemptId || '').localeCompare(a.attemptId || '')));
+      };
+      fetchLoginAttempts();
+    } else {
+      setLoginAttemptsData([]); // Clear data when modal is closed
+    }
+  }, [showNumberInfoModal, selectedNumberForInfo]);
 
   const handleLogout = async () => { if (confirm("Logout?")) { await signOut(auth); window.location.reload(); } };
   
@@ -204,6 +299,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       }
   };
 
+  // --- BROKER ACTIONS ---
+  const handleBlockBroker = async (item: BrokerData) => {
+    if (!confirm(`Block Broker ${item.number}?`)) return;
+    const now = new Date();
+    try {
+        let name = "Unknown"; // Brokers table doesn't have name directly, need to fetch if exists in Numbers
+        try {
+            const d = await getDoc(doc(db, "Numbers", item.number));
+            if (d.exists()) name = d.data().Name || "Unknown";
+        } catch (e) { console.warn("Failed to get name for broker from Numbers", e); }
+
+        await setDoc(doc(db, "Blocked", item.number), {
+            "Blocked Date": now.toLocaleDateString("en-GB"),
+            "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
+            "Reason": `Blocked as Broker`,
+            "Name": name
+        });
+        // Also delete from Brokers collection
+        await deleteDoc(doc(db, "Brokers", item.id)); // Assuming item.id is the document ID in Brokers
+        try { await deleteDoc(doc(db, "Numbers", item.number)); } catch {} // Optional: remove from Numbers too
+
+        setActiveDropdown(null);
+    } catch (e) { console.error(e); }
+  };
+
+
   // Filtering
    const filteredNumbers = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
    const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
@@ -297,13 +418,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
    useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
   const handleDeleteShot = async () => { if (confirm("Delete?")) try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch {} };
 
+  const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
+
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       {/* SIDEBAR */}
       <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header gap-3">
           <div className="rounded border border-indigo-900/50 flex items-center justify-center text-indigo-500 bg-indigo-500/10" style={{ width: '32px', height: '32px' }}><ShieldAlert size={18} /></div>
-          <div><h1 className="font-bold text-white text-sm">The State</h1><p className="text-muted uppercase text-[10px] tracking-wider">System Control</p></div>
+          <div><h1 className="font-bold text-white text-sm">The State</h1></div>
         </div>
         <nav className="flex-1 p-4 flex flex-col gap-2">
           <button onClick={() => setActiveSection('tables')} className={`nav-btn admin-nav-btn ${activeSection === 'tables' ? 'active' : ''}`}><LayoutGrid size={18} /> Tables</button>
@@ -325,7 +448,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
            <div className="flex items-center gap-3">
                    <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
               <div className="rounded-full bg-surface border border-white/10 flex items-center justify-center text-muted font-bold text-xs" style={{ width: '36px', height: '36px' }}>{adminName.charAt(0).toUpperCase()}</div>
-              <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName}</h2><p className="text-xs text-success">Online</p></div>
+              <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName.split(' ')[0]}</h2><p className="text-xs text-success">Online</p></div>
            </div>
            <button onClick={() => setShowSettingsModal(true)} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><Settings size={14} /> Settings</button>
         </header>
@@ -335,24 +458,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
             <div className="h-full flex flex-col gap-4">
               
               {/* TABLE TOOLBAR */}
-              <div className="table-toolbar">
-                 <div className="table-nav">
-                   {['numbers', 'blocked', 'snitches', 'brokers'].map((tab) => (
-                     <button 
-                       key={tab} 
-                       onClick={() => setActiveTableTab(tab as any)} 
-                       className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}
-                     >
-                       {tab}
-                     </button>
-                   ))}
-                 </div>
-                 <div className="flex gap-3 items-center">
-                   <div className="search-container">
+              <div className={`table-toolbar justify-between gap-3 ${isMobile ? 'flex-col' : 'flex-row'}`}>
+                {isMobile ? (
+                  <div className="relative w-full" ref={tableNavRef}>
+                    <button onClick={() => setShowTableNavMenu(!showTableNavMenu)} className="btn btn-secondary btn-toolbar capitalize flex items-center w-full justify-center">
+                      {activeTableTab} <ChevronDown size={16} className={`ml-2 transition-transform ${showTableNavMenu ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showTableNavMenu && (
+                      <div className="options-menu" style={{ top: '100%', right: 'auto', left: 0, width: '100%', marginTop: '8px', transformOrigin: 'top center' }}>
+                        {tableTabs.map((tab) => (
+                          <button
+                            key={tab}
+                            onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }}
+                            className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/10 text-white' : ''}`}
+                          >
+                            <span className={`transition-opacity ${activeTableTab === tab ? 'opacity-100' : 'opacity-0'}`}><Check size={14} /></span>
+                            <span className="flex-1">{tab}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="table-nav">
+                    {tableTabs.map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTableTab(tab as any)}
+                        className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                 <div className={`flex gap-3 items-center ${isMobile ? 'flex-col w-full' : 'flex-row'}`}>
+                   <div className={`search-container ${isMobile ? 'w-full' : ''}`}>
                      <Search className="search-icon" size={16} />
                      <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="search-input" />
                    </div>
-                   {activeTableTab === 'numbers' && <button onClick={() => setShowAddModal(true)} className="btn btn-primary btn-toolbar"><Plus size={16} /> Add</button>}
+                   {activeTableTab === 'numbers' && <button onClick={() => setShowAddModal(true)} className={`btn btn-primary btn-toolbar ${isMobile ? 'w-full' : ''}`}><Plus size={16} /> <span>{isMobile ? 'Add New User': 'Add'}</span></button>}
                  </div>
               </div>
 
@@ -360,7 +505,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 <div className="absolute inset-0 overflow-auto custom-scrollbar">
                   <table className="admin-table">
                     <thead>
-                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Screened</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Date</th><th>Time</th><th className="text-right">Actions</th></>)}</tr>
+                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Quiz Times</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th className="text-right">Actions</th></>)}</tr>
                     </thead>
                     <tbody>
                                  {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
@@ -369,7 +514,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             <>
                               <td className="font-mono text-muted">{(item as NumberData).number}</td>
                               <td className="font-medium text-white">{(item as NumberData).name}</td>
-                              <td><span className={`px-2 py-1 rounded text-xs font-bold ${(item as NumberData).screenedCount > 0 ? 'bg-orange-500/20 text-orange-500 border border-orange-500/20' : 'text-muted'}`}>{(item as NumberData).screenedCount}</span></td>
+                              <td><span className="px-2 py-1 rounded text-xs font-bold bg-white/5 text-white">{(item as NumberData).quizTimes}</span></td>
                               <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).quizEnabled ? 'text-success bg-success/10' : 'text-muted bg-white/5'}`}>{(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</span></td>
                               <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).pdfDown ? 'text-success bg-success/10' : 'text-error bg-error/10'}`}>{(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</span></td>
                               <td className="text-right relative">
@@ -381,6 +526,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                      <button onClick={() => handleBlockNumber(item as NumberData)} className="options-item warning"><Ban size={14} /> Block Number</button>
                                      <button onClick={() => handleToggleQuiz(item as NumberData)} className="options-item"><BookOpen size={14} /> Quiz: {(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</button>
                                      <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button>
+                                     <button onClick={() => { setSelectedNumberForInfo(item as NumberData); setShowNumberInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
                                      <div className="options-divider" />
                                      <button onClick={() => handleDeleteNumber(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                    </div>
@@ -412,8 +558,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                              <>
                                 <td className="font-mono text-muted">{(item as SnitchData).loginNumber}</td>
                                 <td className="font-mono text-error">{(item as SnitchData).snitchNumber}</td>
-                                <td className="text-white">{(item as SnitchData).snitchName}</td>
-                                <td className="text-xs text-muted">{(item as SnitchData).date} {(item as SnitchData).time}</td>
+                                <td className="text-white">{(item as SnitchData).snitchName}</td>                                <td className="text-xs text-muted">{(item as SnitchData).date} {(item as SnitchData).time}</td>
                                 <td className="text-right relative">
                                    <div className="flex justify-end">
                                       <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
@@ -430,15 +575,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           )}
                           {activeTableTab === 'brokers' && (
                              <>
-                                <td className="font-mono text-muted">{(item as BrokerData).number}</td>
-                                <td className="text-sm text-white">{(item as BrokerData).date}</td>
-                                <td className="text-xs text-muted">{(item as BrokerData).time}</td>
+                                                                 <td className="font-mono text-muted">{(item as BrokerData).number}</td>
+                                                                 <td className="text-sm text-error">{(item as BrokerData).count}</td>
+                                                                 <td className="text-sm text-white">{(item as BrokerData).date}</td>                                <td className="text-xs text-muted">{(item as BrokerData).time}</td>
                                 <td className="text-right relative">
                                    <div className="flex justify-end">
                                       <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
                                    </div>
                                    {activeDropdown === item.id && (
                                       <div className="options-menu" style={{ width: '160px' }}>
+                                       <button onClick={() => { setSelectedBrokerForInfo(item as BrokerData); setShowBrokerInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
+                                         <button onClick={() => handleBlockBroker(item as BrokerData)} className="options-item warning"><Ban size={14} /> Block Broker</button>
+                                         <div className="options-divider" />
                                          <button onClick={async () => { if (confirm('Delete record?')) { await deleteDoc(doc(db, 'Brokers', (item as BrokerData).id)); setActiveDropdown(null); } }} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                       </div>
                                    )}
@@ -562,6 +710,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </div>
       </main>
 
+      {/* NUMBER INFO MODAL */}
+      {showNumberInfoModal && selectedNumberForInfo && (
+        <div className="modal-overlay animate-fade-in">
+          <div className="modal-content modal-md p-8 relative">
+            <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
+            <div className="flex flex-col items-center">
+              <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow">
+                <BookOpen size={28} />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Number Info</h2>
+              <p className="text-muted text-sm mb-8 text-center">Login attempts for: <span className="font-mono text-white">{selectedNumberForInfo.number}</span></p>
+
+              <div className="w-full max-h-80 overflow-y-auto custom-scrollbar border border-white/10 rounded-lg p-4 mb-4">
+                {loginAttemptsData.length > 0 ? (
+                  <ul className="space-y-2">
+                    {loginAttemptsData.map((attempt, index) => (
+                      <li key={`${attempt.deviceId}-${attempt.attemptId}`} className="bg-white/5 p-3 rounded-md flex flex-col space-y-1">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-white font-bold">Device: {attempt.deviceId}</span>
+                          <span className="text-sm font-mono text-white select-text">Code: {attempt.Code}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-muted">
+                          <span className="text-sm">Date: {attempt.Date}</span>
+                          <span className="text-sm">Time: {attempt.Time}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-center text-muted text-sm">No recorded login attempts.</p>
+                )}
+              </div>
+
+              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn btn-primary w-full">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BROKER INFO MODAL */}
+      {showBrokerInfoModal && selectedBrokerForInfo && (
+        <div className="modal-overlay animate-fade-in">
+          <div className="modal-content modal-md p-8 relative">
+            <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
+            <div className="flex flex-col items-center">
+              <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow">
+                <BookOpen size={28} />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Broker Info</h2>
+              <p className="text-muted text-sm mb-8 text-center">Attempts for: <span className="font-mono text-white">{selectedBrokerForInfo.number}</span></p>
+
+              <div className="w-full max-h-80 overflow-y-auto custom-scrollbar border border-white/10 rounded-lg p-4 mb-4">
+                {selectedBrokerForInfo.attempts.length > 0 ? (
+                  <ul className="space-y-2">
+                    {selectedBrokerForInfo.attempts.map((attempt, index) => (
+                      <li key={index} className="flex justify-between items-center bg-white/5 p-3 rounded-md">
+                        <span className="text-sm text-muted">{attempt.Date}</span>
+                        {attempt.Password && <span className="text-sm font-mono text-white select-text">{attempt.Password}</span>}
+                        <span className="text-sm font-mono text-white">{attempt.Time}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-center text-muted text-sm">No recorded attempts.</p>
+                )}
+              </div>
+
+              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn btn-primary w-full">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODALS */}
       {showAddModal && (
         <div className="modal-overlay">
@@ -571,7 +796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     <h3 className="text-2xl font-bold text-white">Add New User</h3>
                     <p className="text-muted text-sm mt-1">Create a new user account</p>
                  </div>
-                 <button onClick={() => setShowAddModal(false)} className="btn-icon text-muted hover:text-white"><X size={20} /></button>
+                 <button onClick={() => setShowAddModal(false)} className="btn-icon"><X size={20} /></button>
               </div>
 
               <div className="space-y-6">

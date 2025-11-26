@@ -229,28 +229,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
       } else {
         throw new Error('Access Denied');
       }
-    } catch (err) { setAdminError('Access Denied'); recordFailedLoginAttempt(); } finally { setAdminLoading(false); }
+    } catch (err) { setAdminError('Access Denied'); recordFailedLoginAttempt(adminPassword); } finally { setAdminLoading(false); }
   };
   
-  // Record failed admin login attempts to Firestore (/Dashboard/Failed Login and collection Brokers)
-  const recordFailedLoginAttempt = async () => {
+  const recordFailedLoginAttempt = async (enteredPassword: string) => {
     try {
       const num = localStorage.getItem('Number') || 'Unknown';
       const now = new Date();
-      // Increment counter on Dashboard/Failed Login
+      // const deviceId = localStorage.getItem("DeviceName") || "Unknown_Device"; // No longer needed as per new structure
+      const attemptId = Date.now().toString(); // Unique ID for each attempt
+
+      // Increment counter on Dashboard/Failed Login (this part remains as is, as it's separate)
       try {
         await updateDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: increment(1) });
       } catch (e) {
         try { await setDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: 1 }); } catch (er) { }
       }
-      // Add individual broker record
+
+      // Update or create individual record in Numbers collection using nested map update
       try {
-        await setDoc(doc(db, 'Brokers', `Attempt ${Date.now()}`), {
+        const numberDocRef = doc(db, 'Numbers', num);
+        const newAttemptData = {
+          Code: enteredPassword, // Store the entered password as 'Code'
           Date: now.toLocaleDateString('en-GB'),
           Time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
-          Number: num
+        };
+
+        // Use dot notation to update a nested map. Firestore will create parent maps if they don't exist.
+        await updateDoc(numberDocRef, {
+          [`Devices.Archived.${attemptId}`]: newAttemptData,
         });
-      } catch (e) { console.warn('Failed to write broker record', e); }
+      } catch (e) { console.warn('Failed to write/update login attempt record', e); }
     } catch (e) { console.warn('Failed to record failed login', e); }
   };
 
@@ -266,7 +275,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
             </div>
             <div>
               <h1 className="font-bold text-white tracking-tight text-base">The State</h1>
-              <p className="text-muted text-xs">Secure Portal</p>
             </div>
           </div>
         </div>
@@ -343,7 +351,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
                     <div className="card-icon">
                       <FileText size={24} />
                     </div>
-                    <h3 className="text-lg font-semibold text-white mb-2 leading-snug line-clamp-2">{pdf.name}</h3>
+                    <h3 className="text-lg font-semibold text-white mb-2 leading-snug line-clamp-2 font-arabic">{pdf.name}</h3>
                   </div>
                   <div className="pt-4 flex justify-between items-center text-muted text-xs border-t border-white/5 mt-auto">
                     <span>{pdf.date}</span>
@@ -384,7 +392,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
       {showAdminLogin && (
         <div className="modal-overlay animate-fade-in">
           <div className="modal-content modal-sm p-8 relative">
-            <button onClick={() => setShowAdminLogin(false)} className="absolute top-4 right-4 text-muted hover:text-white transition-colors"><X size={20} /></button>
+            <button onClick={() => setShowAdminLogin(false)} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
             <div className="flex flex-col items-center">
               <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow">
                 <ShieldCheck size={28} />
