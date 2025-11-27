@@ -95,6 +95,8 @@ button, input { font-family: inherit; font-size: inherit; }
 .justify-center { justify-content: center; }
 .justify-between { justify-content: space-between; }
 .justify-end { justify-content: flex-end; }
+.flex-grow { flex-grow: 1; }
+.flex-shrink-0 { flex-shrink: 0; }
 .flex-1 { flex: 1 1 0%; }
 .grid { display: grid; }
 .grid-cols-\[auto_1fr_auto\] { grid-template-columns: auto 1fr auto; }
@@ -134,6 +136,7 @@ button, input { font-family: inherit; font-size: inherit; }
 .h-9 { height: 36px; }
 .h-10 { height: 40px; }
 .h-8 { height: 32px; }
+.min-h-0 { min-height: 0; }
 
 /* Specific Padding for Icons */
 .pl-4 { padding-left: 16px !important; }
@@ -272,7 +275,7 @@ button, input { font-family: inherit; font-size: inherit; }
 
 /* Modals */
 .modal-overlay { position: fixed; inset: 0; z-index: 120000; background-color: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 20px; }
-.modal-content { background-color: #050505; border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-modal); overflow: hidden; display: flex; flex-direction: column; width: 100%; animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-content { background-color: #050505; border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-modal); overflow: hidden; display: flex; flex-direction: column; width: 100%; max-height: 90vh; animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .modal-sm { max-width: 400px; }
 .modal-md { max-width: 520px; }
 .modal-lg { max-width: 800px; }

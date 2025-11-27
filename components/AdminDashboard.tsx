@@ -3,7 +3,7 @@ import { db, storage, auth } from '../firebaseConfig';
 import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
-import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion } from 'lucide-react';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -12,6 +12,9 @@ interface SnitchData { id: string; loginNumber: string; snitchNumber: string; sn
 interface BrokerData { id: string; number: string; count: number; date: string; time: string; attempts: { Date: string; Time: string; Password?: string; }[]; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
 
+// Define a union type for the active info modal
+type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots'>('tables');
    const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
@@ -19,13 +22,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [numbers, setNumbers] = useState<NumberData[]>([]);
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
      const [snitches, setSnitches] = useState<SnitchData[]>([]);
-     const [showNumberInfoModal, setShowNumberInfoModal] = useState(false);
-     const [selectedNumberForInfo, setSelectedNumberForInfo] = useState<NumberData | null>(null);
+     const [showInfoModal, setShowInfoModal] = useState(false); // Unified modal visibility
+     const [activeInfo, setActiveInfo] = useState<ActiveInfo | null>(null); // Holds the data for the active info display
      const [loginAttemptsData, setLoginAttemptsData] = useState<LoginAttempt[]>([]); // New state for login attempts
 
   const [brokers, setBrokers] = useState<BrokerData[]>([]);
-  const [showBrokerInfoModal, setShowBrokerInfoModal] = useState(false);
-  const [selectedBrokerForInfo, setSelectedBrokerForInfo] = useState<BrokerData | null>(null);
   const [adminName, setAdminName] = useState('Admin');
   
   // Files State
@@ -177,9 +178,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
           // ------------------------------------
           
-          if (data && typeof data === 'object' && data.devices && typeof data.devices === 'object' && data.devices.Archived && typeof data.devices.Archived === 'object') {
-            Object.keys(data.devices.Archived).forEach(attemptId => {
-              const attemptData = data.devices.Archived![attemptId];
+          if (data && typeof data === 'object' && data.Devices && typeof data.Devices === 'object' && data.Devices.Archived && typeof data.Devices.Archived === 'object') {
+            Object.keys(data.Devices.Archived).forEach(attemptId => {
+              const attemptData = data.Devices.Archived![attemptId];
               if (attemptData && typeof attemptData === 'object') {
                 attempts.push({
                   attemptId: attemptId,
@@ -192,8 +193,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
             });
           }
         }
-        // Sort attempts, e.g., by attemptId (which is a timestamp string)
-        setLoginAttemptsData(attempts.sort((a, b) => (b.attemptId || '').localeCompare(a.attemptId || '')));
+        // Sort attempts by Device ID (attemptId) numerically in ascending order
+        setLoginAttemptsData(attempts.sort((a, b) => parseInt(a.attemptId || '0') - parseInt(b.attemptId || '0')));
       };
       fetchLoginAttempts();
     } else {
@@ -713,37 +714,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {/* NUMBER INFO MODAL */}
       {showNumberInfoModal && selectedNumberForInfo && (
         <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-md p-8 relative">
-            <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
-            <div className="flex flex-col items-center">
-              <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow">
-                <BookOpen size={28} />
+          <div className="modal-content modal-lg p-0 relative flex flex-col">
+            {/* 1. Header */}
+            <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
+              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
+              <div className="flex flex-col items-center w-full">
+                <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
+                  <BookOpen size={28} />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">Number Info</h2>
+                <p className="text-muted text-sm text-center">Login attempts for: <span className="font-mono text-white">{selectedNumberForInfo.number}</span></p>
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Number Info</h2>
-              <p className="text-muted text-sm mb-8 text-center">Login attempts for: <span className="font-mono text-white">{selectedNumberForInfo.number}</span></p>
+            </div>
 
-              <div className="w-full max-h-80 overflow-y-auto custom-scrollbar border border-white/10 rounded-lg p-4 mb-4">
+            {/* 2. Scrollable Body */}
+            <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0" style={{ overflow: 'scroll' }}>
+              <div className="p-6 md:p-8">
                 {loginAttemptsData.length > 0 ? (
-                  <ul className="space-y-2">
-                    {loginAttemptsData.map((attempt, index) => (
-                      <li key={`${attempt.deviceId}-${attempt.attemptId}`} className="bg-white/5 p-3 rounded-md flex flex-col space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-white font-bold">Device: {attempt.deviceId}</span>
-                          <span className="text-sm font-mono text-white select-text">Code: {attempt.Code}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-muted">
-                          <span className="text-sm">Date: {attempt.Date}</span>
-                          <span className="text-sm">Time: {attempt.Time}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="overflow-x-auto max-h-[200px] overflow-y-auto custom-scrollbar">
+                    <table className="admin-table w-full">
+                      <thead>
+                        <tr>
+                          <th>Device ID</th>
+                          <th>Code</th>
+                          <th>Date</th>
+                          <th>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loginAttemptsData.map((attempt) => (
+                          <tr key={attempt.attemptId}>
+                            <td className="font-mono text-muted truncate max-w-xs">{attempt.deviceId}</td>
+                            <td className="font-mono text-white select-text">{attempt.Code}</td>
+                            <td className="text-muted">{attempt.Date}</td>
+                            <td className="text-muted">{attempt.Time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
-                  <p className="text-center text-muted text-sm">No recorded login attempts.</p>
+                  <div className="text-center text-muted text-sm py-10">
+                    <p>No recorded login attempts.</p>
+                  </div>
                 )}
               </div>
+            </div>
 
-              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn btn-primary w-full">
+            {/* 3. Footer */}
+            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
+              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn btn-secondary w-full">
                 Close
               </button>
             </div>
@@ -754,32 +774,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {/* BROKER INFO MODAL */}
       {showBrokerInfoModal && selectedBrokerForInfo && (
         <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-md p-8 relative">
-            <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
-            <div className="flex flex-col items-center">
-              <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow">
-                <BookOpen size={28} />
+          <div className="modal-content modal-lg p-0 relative flex flex-col">
+            {/* 1. Header */}
+            <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
+              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
+              <div className="flex flex-col items-center w-full">
+                <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
+                  <BookOpen size={28} />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">Broker Info</h2>
+                <p className="text-muted text-sm text-center">Attempts for: <span className="font-mono text-white">{selectedBrokerForInfo.number}</span></p>
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Broker Info</h2>
-              <p className="text-muted text-sm mb-8 text-center">Attempts for: <span className="font-mono text-white">{selectedBrokerForInfo.number}</span></p>
-
-              <div className="w-full max-h-80 overflow-y-auto custom-scrollbar border border-white/10 rounded-lg p-4 mb-4">
+            </div>
+            
+            {/* 2. Scrollable Body */}
+            <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
+              <div className="p-6 md:p-8">
                 {selectedBrokerForInfo.attempts.length > 0 ? (
-                  <ul className="space-y-2">
-                    {selectedBrokerForInfo.attempts.map((attempt, index) => (
-                      <li key={index} className="flex justify-between items-center bg-white/5 p-3 rounded-md">
-                        <span className="text-sm text-muted">{attempt.Date}</span>
-                        {attempt.Password && <span className="text-sm font-mono text-white select-text">{attempt.Password}</span>}
-                        <span className="text-sm font-mono text-white">{attempt.Time}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="overflow-x-auto">
+                    <table className="admin-table w-full">
+                      <thead>
+                        <tr>
+                          <th>Password</th>
+                          <th>Date</th>
+                          <th>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...selectedBrokerForInfo.attempts].reverse().map((attempt, index) => (
+                          <tr key={index}>
+                            <td className="font-mono text-white select-text">{attempt.Password || 'N/A'}</td>
+                            <td className="text-muted">{attempt.Date}</td>
+                            <td className="text-muted">{attempt.Time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
-                  <p className="text-center text-muted text-sm">No recorded attempts.</p>
+                  <div className="text-center text-muted text-sm py-10">
+                    <p>No recorded attempts.</p>
+                  </div>
                 )}
               </div>
+            </div>
 
-              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn btn-primary w-full">
+            {/* 3. Footer */}
+            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
+              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn btn-secondary w-full">
                 Close
               </button>
             </div>

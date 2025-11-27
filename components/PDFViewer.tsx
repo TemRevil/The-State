@@ -252,30 +252,33 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       ) : (
         <div className="modal-content modal-xl relative flex flex-col h-[90vh]">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-surface z-10 shrink-0">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
-                <AlertCircle size={18} />
+          <div className="flex items-center justify-between px-10 py-5 border-b border-white/10 bg-app-surface/30 backdrop-blur-lg z-10 shrink-0">
+            <div className="flex items-center gap-4 flex-1 min-w-0">
+              <div className="p-2.5 bg-primary/10 rounded-lg text-primary shrink-0">
+                <FileText size={20} />
               </div>
-              <h3 className="font-semibold text-white truncate">{pdf.name}</h3>
+              <div className="flex flex-col min-w-0">
+                <h3 className="font-semibold text-white truncate leading-tight" title={pdf.name}>{pdf.name}</h3>
+                <p className="text-xs text-muted truncate">{pdf.size} - {pdf.date}</p>
+              </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {canDownload && (
                 <button 
                   onClick={handleDownload} 
                   disabled={loading || downloadLoading}
-                  className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
+                  className="btn btn-sm btn-ghost disabled:opacity-50 disabled:cursor-not-allowed group"
                   title="Download PDF"
                 >
                   {downloadLoading ? (
-                    <Loader2 size={20} className="animate-spin" />
+                    <Loader2 size={18} className="animate-spin" />
                   ) : (
-                    <Download size={20} />
+                    <Download size={18} className="text-muted group-hover:text-primary transition-colors" />
                   )}
                 </button>
               )}
-              <button onClick={onClose} className="btn-icon hover:text-white">
-                <X size={20} />
+              <button onClick={onClose} className="btn btn-sm btn-ghost group" title="Close">
+                <X size={18} className="text-muted group-hover:text-white transition-colors" />
               </button>
             </div>
           </div>
