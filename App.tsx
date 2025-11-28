@@ -41,6 +41,31 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'admin'>('login');
   const [isAdmin, setIsAdmin] = useState(false);
   const [limitsExceeded, setLimitsExceeded] = useState<boolean | null>(null);
+  const [resetTimer, setResetTimer] = useState<string>('');
+
+  const calculateResetTimer = () => {
+    const now = new Date();
+    const nextPacificMidnight = new Date(now);
+    nextPacificMidnight.setUTCHours(8, 0, 0, 0); // 08:00 UTC is midnight PST
+    if (nextPacificMidnight <= now) {
+      nextPacificMidnight.setUTCDate(nextPacificMidnight.getUTCDate() + 1);
+    }
+    const timeUntilReset = nextPacificMidnight.getTime() - now.getTime();
+    const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
+    const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeUntilReset % (1000 * 60)) / 1000);
+    return `${hours}h ${minutes}m ${seconds}s`;
+  };
+
+  useEffect(() => {
+    if (limitsExceeded) {
+      const interval = setInterval(() => {
+        setResetTimer(calculateResetTimer());
+      }, 1000); // Update every second
+      setResetTimer(calculateResetTimer()); // Initial set
+      return () => clearInterval(interval);
+    }
+  }, [limitsExceeded]);
 
   useEffect(() => {
     const num = localStorage.getItem("Number");
@@ -105,8 +130,25 @@ const App: React.FC = () => {
               reason: reason,
               timestamp: new Date()
             });
+            // Calculate time until Pacific midnight (PST/PDT)
+            const now = new Date();
+            // Pacific time is UTC-8 (PST) or UTC-7 (PDT), but for simplicity use PST
+            const pacificOffset = -8; // PST
+            const nowPacific = new Date(now.getTime() + (pacificOffset * 60 * 60 * 1000));
+            const pacificMidnight = new Date(nowPacific);
+            pacificMidnight.setHours(24, 0, 0, 0);
+            const timeUntilReset = pacificMidnight.getTime() - now.getTime();
+            const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
+            const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+            console.log(`Limits exceeded. Daily reset in ${hours}h ${minutes}m (Pacific time)`);
           } else {
             setLimitsExceeded(false);
+            // Reset shutdown flag if limits are no longer exceeded
+            await setDoc(doc(db, 'config', 'shutdown'), {
+              shutdown: false,
+              reason: 'Limits reset',
+              timestamp: new Date()
+            });
           }
         } catch (error) {
           console.error('Error checking limits:', error);
@@ -194,7 +236,8 @@ const App: React.FC = () => {
           <div className="text-center">
             <ShieldAlert size={80} className="text-error mb-6 mx-auto" />
             <h1 className="text-6xl font-extrabold text-error tracking-tight mb-2">Limits Exceeded</h1>
-            <p className="text-lg text-muted">Access Denied</p>
+            <p className="text-lg text-muted mb-4">Access Denied</p>
+            <p className="text-sm text-dim">Daily reset in {resetTimer}</p>
           </div>
         </div>
       </main>
