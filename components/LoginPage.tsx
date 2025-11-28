@@ -191,14 +191,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (userDoc.exists()) {
          const d = userDoc.data();
          const devs = d.Devices || {};
-         const allowed = devs["Devices Allowed"] || 5;
          const map = devs["Devices Name"] || {};
          const vals = Object.values(map);
-         if (!vals.includes(devName as any) && vals.length >= allowed) throw new Error("Device limit reached");
          const arch = devs.Archived || {};
          arch[Object.keys(arch).length + 1] = { Code: code, Date: fmtDate(), Time: fmtTime() };
          if (!vals.includes(devName as any)) map[Object.keys(map).length + 1] = devName;
-         await updateDoc(doc(db, "Numbers", phoneValue), { Devices: { "Devices Allowed": allowed, "Devices Name": map, Archived: arch } });
+         await updateDoc(doc(db, "Numbers", phoneValue), { Devices: { "Devices Name": map, Archived: arch } });
          
          if (d.Name && d.Name !== "Unknown") {
             localStorage.setItem("Name", d.Name); onLoginSuccess();
@@ -210,7 +208,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       }
     } catch (err: any) {
        console.error(err);
-       setError(err.message === "Device limit reached" ? "Maximum device limit reached." : "Authentication Failed.");
+       setError("Authentication Failed.");
     } finally { setIsLoading(false); }
   };
 

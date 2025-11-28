@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { storage, auth, db } from '../firebaseConfig';
+import { storage, auth, db, functions } from '../firebaseConfig';
 import { ref, listAll, getMetadata, uploadBytes } from 'firebase/storage';
 import { collection, doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff } from 'lucide-react';
 import { PDFViewer } from './PDFViewer';
 
@@ -33,6 +34,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [userStats, setUserStats] = useState<{ quiziTimes?: number; screened?: number }>({});
 
   const passwordInputRef = useRef<HTMLInputElement>(null);
+
 
   useEffect(() => {
     setUserName(localStorage.getItem("Name") || "User");
@@ -239,6 +241,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       } catch (e) { console.warn('Failed to write/update login attempt record', e); }
     } catch (e) { console.warn('Failed to record failed login', e); }
   };
+
 
   return (
     <div className="flex flex-row h-screen w-full select-none overflow-hidden bg-app-base">

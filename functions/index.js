@@ -6,6 +6,34 @@ admin.initializeApp();
 
 const monitoringClient = new MetricServiceClient();
 
+// Free tier limits
+const LIMITS = {
+  firestore: {
+    daily: {
+      reads: 50000,
+      writes: 20000,
+      deletes: 20000
+    }
+  },
+  storage: {
+    daily: {
+      bandwidth: 1024 * 1024 * 1024, // 1 GB in bytes
+      operations: 20000
+    },
+    total: {
+      stored: 5 * 1024 * 1024 * 1024 // 5 GB in bytes
+    }
+  },
+  functions: {
+    monthly: {
+      invocations: 2000000,
+      gbSeconds: 400000,
+      cpuSeconds: 200000,
+      network: 5 * 1024 * 1024 * 1024 // 5 GB in bytes
+    }
+  }
+};
+
 async function getMetricTimeSeries(metricType, days = 30) {
   const projectName = monitoringClient.projectPath('state-a1');
   const now = Math.floor(Date.now() / 1000);
@@ -48,21 +76,136 @@ async function getMetricTimeSeries(metricType, days = 30) {
   }
 }
 
-async function checkLimits() {
-  // Get current usage
-  const [firestoreReads, firestoreWrites] = await Promise.all([
-    getMetricTimeSeries('firestore.googleapis.com/document/read_count'),
-    getMetricTimeSeries('firestore.googleapis.com/document/write_count'),
+async function getCurrentUsage() {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  // Get daily usage (last 24 hours)
+  const [firestoreReadsDaily, firestoreWritesDaily, firestoreDeletesDaily, storageBandwidthDaily, storageRequestsDaily] = await Promise.all([
+    getMetricTimeSeries('firestore.googleapis.com/document/read_count', 1),
+    getMetricTimeSeries('firestore.googleapis.com/document/write_count', 1),
+    getMetricTimeSeries('firestore.googleapis.com/document/delete_count', 1),
+    getMetricTimeSeries('storage.googleapis.com/network/sent_bytes_count', 1),
+    getMetricTimeSeries('storage.googleapis.com/api/request_count', 1),
   ]);
 
-  const reads = firestoreReads.reduce((sum, p) => sum + p.value, 0);
-  const writes = firestoreWrites.reduce((sum, p) => sum + p.value, 0);
+  // Get monthly usage (last 30 days)
+  const [functionsInvocationsMonthly, functionsGbSecondsMonthly, functionsCpuSecondsMonthly, functionsNetworkMonthly] = await Promise.all([
+    getMetricTimeSeries('cloudfunctions.googleapis.com/function/execution_count', 30),
+    getMetricTimeSeries('cloudfunctions.googleapis.com/function/execution_time', 30), // in seconds, need to convert to GB-seconds
+    getMetricTimeSeries('cloudfunctions.googleapis.com/function/cpu_time', 30), // in seconds
+    getMetricTimeSeries('cloudfunctions.googleapis.com/function/network_egress', 30), // in bytes
+  ]);
 
-  const FIRESTORE_MONTHLY_READS_LIMIT = 1500000; // 1.5M
-  const FIRESTORE_MONTHLY_WRITES_LIMIT = 600000; // 600K
+  // Sum daily usage
+  const sumArray = (arr) => arr.reduce((sum, item) => sum + item.value, 0);
+  const dailyUsage = {
+    firestore: {
+      reads: sumArray(firestoreReadsDaily),
+      writes: sumArray(firestoreWritesDaily),
+      deletes: sumArray(firestoreDeletesDaily)
+    },
+    storage: {
+      bandwidth: sumArray(storageBandwidthDaily),
+      operations: sumArray(storageRequestsDaily)
+    }
+  };
 
-  if (reads > FIRESTORE_MONTHLY_READS_LIMIT || writes > FIRESTORE_MONTHLY_WRITES_LIMIT) {
-    throw new functions.https.HttpsError('resource-exhausted', 'Firebase free tier limits exceeded. Please upgrade your plan.');
+  // Sum monthly usage
+  const monthlyUsage = {
+    functions: {
+      invocations: sumArray(functionsInvocationsMonthly),
+      gbSeconds: sumArray(functionsGbSecondsMonthly), // execution_time in seconds, treat as GB-seconds for approximation
+      cpuSeconds: sumArray(functionsCpuSecondsMonthly),
+      network: sumArray(functionsNetworkMonthly)
+    }
+  };
+
+  // Get current storage stored
+  const bucket = admin.storage().bucket();
+  const [files] = await bucket.getFiles();
+  let totalStored = 0;
+  for (const file of files) {
+    totalStored += parseInt(file.metadata.size || '0');
+  }
+
+
+  return {
+    daily: dailyUsage,
+    monthly: monthlyUsage,
+    storageStored: totalStored
+  };
+}
+
+async function checkLimits(operation) {
+  const usage = await getCurrentUsage();
+
+  let limitExceeded = false;
+  let reason = '';
+
+  // Check daily limits
+  if (operation.firestore) {
+    if (usage.daily.firestore.reads + (operation.firestore.reads || 0) > LIMITS.firestore.daily.reads) {
+      limitExceeded = true;
+      reason = 'Firestore daily read limit exceeded.';
+    }
+    if (usage.daily.firestore.writes + (operation.firestore.writes || 0) > LIMITS.firestore.daily.writes) {
+      limitExceeded = true;
+      reason = 'Firestore daily write limit exceeded.';
+    }
+    if (usage.daily.firestore.deletes + (operation.firestore.deletes || 0) > LIMITS.firestore.daily.deletes) {
+      limitExceeded = true;
+      reason = 'Firestore daily delete limit exceeded.';
+    }
+  }
+
+  if (operation.storage) {
+    if (usage.daily.storage.bandwidth + (operation.storage.bandwidth || 0) > LIMITS.storage.daily.bandwidth) {
+      limitExceeded = true;
+      reason = 'Storage daily bandwidth limit exceeded.';
+    }
+    if (usage.daily.storage.operations + (operation.storage.operations || 0) > LIMITS.storage.daily.operations) {
+      limitExceeded = true;
+      reason = 'Storage daily operations limit exceeded.';
+    }
+    if (usage.storageStored + (operation.storage.stored || 0) > LIMITS.storage.total.stored) {
+      limitExceeded = true;
+      reason = 'Storage total stored limit exceeded.';
+    }
+  }
+
+  if (operation.functions) {
+    if (usage.monthly.functions.invocations + (operation.functions.invocations || 0) > LIMITS.functions.monthly.invocations) {
+      limitExceeded = true;
+      reason = 'Functions monthly invocations limit exceeded.';
+    }
+    if (usage.monthly.functions.gbSeconds + (operation.functions.gbSeconds || 0) > LIMITS.functions.monthly.gbSeconds) {
+      limitExceeded = true;
+      reason = 'Functions monthly GB-seconds limit exceeded.';
+    }
+    if (usage.monthly.functions.cpuSeconds + (operation.functions.cpuSeconds || 0) > LIMITS.functions.monthly.cpuSeconds) {
+      limitExceeded = true;
+      reason = 'Functions monthly CPU-seconds limit exceeded.';
+    }
+    if (usage.monthly.functions.network + (operation.functions.network || 0) > LIMITS.functions.monthly.network) {
+      limitExceeded = true;
+      reason = 'Functions monthly network limit exceeded.';
+    }
+  }
+
+  if (limitExceeded) {
+    // Set shutdown flag in Firestore
+    try {
+      await admin.firestore().collection('config').doc('shutdown').set({
+        shutdown: true,
+        reason: reason,
+        timestamp: new Date()
+      });
+    } catch (error) {
+      console.error('Failed to set shutdown flag:', error);
+    }
+    throw new Error(reason + ' Project shutdown initiated.');
   }
 }
 
@@ -110,13 +253,10 @@ exports.getFirebaseUsage = functions.https.onCall(async (data, context) => {
   }
 });
 
-// API-level limit enforcement functions
 exports.createUser = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
   }
-
-  await checkLimits();
 
   const { number, name, pdfDown } = data;
   try {
@@ -125,7 +265,7 @@ exports.createUser = functions.https.onCall(async (data, context) => {
       "PDF-Down": pdfDown,
       "Quiz-Enabled": true,
       "Quizi-Times": 0,
-      "Devices": {"Devices Allowed": 1},
+      "Devices": {},
       "Screened": 0
     });
     return { success: true };
@@ -138,8 +278,6 @@ exports.updateUserQuiz = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
   }
-
-  await checkLimits();
 
   const { number, enabled } = data;
   try {
@@ -155,8 +293,6 @@ exports.updateUserPdf = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
   }
 
-  await checkLimits();
-
   const { number, enabled } = data;
   try {
     await admin.firestore().collection('Numbers').doc(number).update({ "PDF-Down": enabled });
@@ -171,8 +307,6 @@ exports.deleteUser = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
   }
 
-  await checkLimits();
-
   const { number } = data;
   try {
     await admin.firestore().collection('Numbers').doc(number).delete();
@@ -186,8 +320,6 @@ exports.blockUser = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
   }
-
-  await checkLimits();
 
   const { number, name, reason } = data;
   const now = new Date();

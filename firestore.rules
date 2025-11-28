@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to always access config collection
+    match /config/{document} {
+      allow read, write: if request.auth != null;
+    }
+    // For all other documents, allow only if shutdown flag is not set or false
+    match /{document=**} {
+      allow read, write: if request.auth != null && (!exists(/databases/$(database)/documents/config/shutdown) ||
+        get(/databases/$(database)/documents/config/shutdown).data.shutdown == false);
+    }
+  }
+}

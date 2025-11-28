@@ -5,7 +5,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnaps
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer } from 'recharts';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -17,16 +17,6 @@ interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; ur
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
-  // Firebase Limits
-  const FIRESTORE_DAILY_READS_LIMIT = 0;
-  const FIRESTORE_DAILY_WRITES_LIMIT = 0;
-  const FIRESTORE_DAILY_DELETES_LIMIT = 0;
-  const FIRESTORE_MONTHLY_READS_LIMIT = 0;
-  const FIRESTORE_MONTHLY_WRITES_LIMIT = FIRESTORE_DAILY_WRITES_LIMIT * 0;
-  const FIRESTORE_MONTHLY_DELETES_LIMIT = FIRESTORE_DAILY_DELETES_LIMIT * 0;
-  const STORAGE_MONTHLY_BYTES_LIMIT = 0 * 1024 * 1024 * 1024; // 5GB in bytes
-  const STORAGE_MONTHLY_BANDWIDTH_LIMIT = 0 * 1024 * 1024 * 1024; // 1GB in bytes
-  const STORAGE_MONTHLY_REQUESTS_LIMIT = 1;
 
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
    const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
@@ -51,8 +41,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [shots, setShots] = useState<any[]>([]);
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
   const [firebaseUsage, setFirebaseUsage] = useState<{ firestore: any; storage: any } | null>(null);
-  const [limitsExceeded, setLimitsExceeded] = useState(false);
-  const [appBlocked, setAppBlocked] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -187,39 +175,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Effect to check limits on app start
-  useEffect(() => {
-    const checkLimits = async () => {
-      try {
-        const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-        const result = await getUsage();
-        setFirebaseUsage(result.data as any);
-
-        // Check if limits exceeded
-        const data = result.data as any;
-        const reads = data.firestore.reads.reduce((sum: number, p: any) => sum + p.value, 0);
-        const writes = data.firestore.writes.reduce((sum: number, p: any) => sum + p.value, 0);
-        const deletes = data.firestore.deletes.reduce((sum: number, p: any) => sum + p.value, 0);
-        const bytes = data.storage.bytesStored[0]?.value * 1024 * 1024 || 0; // Convert MB to bytes
-        const bandwidth = data.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0) * 1024 * 1024; // MB to bytes
-        const requests = data.storage.requests.reduce((sum: number, p: any) => sum + p.value, 0);
-
-        const exceeded = reads > FIRESTORE_MONTHLY_READS_LIMIT ||
-                         writes > FIRESTORE_MONTHLY_WRITES_LIMIT ||
-                         deletes > FIRESTORE_MONTHLY_DELETES_LIMIT ||
-                         bytes > STORAGE_MONTHLY_BYTES_LIMIT ||
-                         bandwidth > STORAGE_MONTHLY_BANDWIDTH_LIMIT ||
-                         requests > STORAGE_MONTHLY_REQUESTS_LIMIT;
-
-        setLimitsExceeded(exceeded);
-        setAppBlocked(exceeded);
-      } catch (error) {
-        console.error('Failed to check limits:', error);
-        // If can't check, allow access for now
-      }
-    };
-    checkLimits();
-  }, []);
 
   // Effect to fetch login attempts when the modal is shown
   useEffect(() => {
@@ -272,11 +227,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         await createUserFunc({ number: newNumber, name: "Unknown", pdfDown: newPdfDown });
         setShowAddModal(false); setNewNumber(''); setNewPdfDown(false);
     } catch (e: any) {
-        if (e.code === 'functions/resource-exhausted') {
-            alert("Firebase limits exceeded. Cannot create user.");
-        } else {
-            console.error(e);
-        }
+        console.error(e);
     }
   };
 
@@ -287,11 +238,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         await deleteUserFunc({ number: id.trim() });
         setActiveDropdown(null);
       } catch (e: any) {
-        if (e.code === 'functions/resource-exhausted') {
-          alert("Firebase limits exceeded. Cannot delete user.");
-        } else {
-          console.error(e);
-        }
+        console.error(e);
       }
     });
   };
@@ -303,11 +250,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         await blockUserFunc({ number: item.number, name: item.name, reason: "Blocked by Admin" });
         setActiveDropdown(null);
       } catch (e: any) {
-        if (e.code === 'functions/resource-exhausted') {
-          alert("Firebase limits exceeded. Cannot block user.");
-        } else {
-          console.error(e);
-        }
+        console.error(e);
       }
     });
   };
@@ -318,11 +261,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         await updateQuizFunc({ number: item.number, enabled: !item.quizEnabled });
         setActiveDropdown(null);
       } catch (e: any) {
-        if (e.code === 'functions/resource-exhausted') {
-          alert("Firebase limits exceeded. Cannot update user.");
-        } else {
-          console.error(e);
-        }
+        console.error(e);
       }
   };
 
@@ -332,11 +271,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         await updatePdfFunc({ number: item.number, enabled: !item.pdfDown });
         setActiveDropdown(null);
       } catch (e: any) {
-        if (e.code === 'functions/resource-exhausted') {
-          alert("Firebase limits exceeded. Cannot update user.");
-        } else {
-          console.error(e);
-        }
+        console.error(e);
       }
   };
 
@@ -362,7 +297,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       showConfirm(`Unblock ${item.number}?`, async () => {
         try {
           await setDoc(doc(db, "Numbers", item.number), {
-              "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {"Devices Allowed": 1}
+              "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {}
           });
           await deleteDoc(doc(db, "Blocked", item.number));
           setActiveDropdown(null);
@@ -545,24 +480,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
            const getUsage = httpsCallable(functions, 'getFirebaseUsage');
            const result = await getUsage();
            setFirebaseUsage(result.data as any);
-
-           // Check if limits exceeded
-           const data = result.data as any;
-           const reads = data.firestore.reads.reduce((sum: number, p: any) => sum + p.value, 0);
-           const writes = data.firestore.writes.reduce((sum: number, p: any) => sum + p.value, 0);
-           const deletes = data.firestore.deletes.reduce((sum: number, p: any) => sum + p.value, 0);
-           const bytes = data.storage.bytesStored[0]?.value * 1024 * 1024 || 0; // Convert MB to bytes
-           const bandwidth = data.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0) * 1024 * 1024; // MB to bytes
-           const requests = data.storage.requests.reduce((sum: number, p: any) => sum + p.value, 0);
-
-           const exceeded = reads > FIRESTORE_MONTHLY_READS_LIMIT ||
-                            writes > FIRESTORE_MONTHLY_WRITES_LIMIT ||
-                            deletes > FIRESTORE_MONTHLY_DELETES_LIMIT ||
-                            bytes > STORAGE_MONTHLY_BYTES_LIMIT ||
-                            bandwidth > STORAGE_MONTHLY_BANDWIDTH_LIMIT ||
-                            requests > STORAGE_MONTHLY_REQUESTS_LIMIT;
-
-           setLimitsExceeded(exceeded);
          } catch (error) {
            console.error('Failed to fetch Firebase usage:', error);
          }
@@ -588,21 +505,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
 
-  if (appBlocked) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <div className="bg-surface border border-error/20 p-8 rounded-xl max-w-md text-center shadow-2xl">
-          <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-6">
-            <ShieldAlert size={32} className="text-error" />
-          </div>
-          <h2 className="text-2xl font-bold text-error mb-4">Limits Exceeded</h2>
-          <button onClick={() => window.location.reload()} className="btn btn-primary mt-6 w-full">
-            Refresh Page
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-black">
@@ -945,7 +847,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
                         <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#readsGradient)" strokeWidth={2} />
-                        <ReferenceLine y={1500000} stroke="red" strokeDasharray="5 5" label="Free Limit (1.5M)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -964,7 +865,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
                         <Area type="monotone" dataKey="value" stroke="#ffd166" fill="url(#writesGradient)" strokeWidth={2} />
-                        <ReferenceLine y={600000} stroke="red" strokeDasharray="5 5" label="Free Limit (600K)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -985,7 +885,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
                         <Area type="monotone" dataKey="value" stroke="#06d6a0" fill="url(#deletesGradient)" strokeWidth={2} />
-                        <ReferenceLine y={600000} stroke="red" strokeDasharray="5 5" label="Free Limit (600K)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -1006,7 +905,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bytes Stored']} />
                         <Area type="monotone" dataKey="value" stroke="#118ab2" fill="url(#bytesGradient)" strokeWidth={2} />
-                        <ReferenceLine y={5120} stroke="red" strokeDasharray="5 5" label="Free Limit (5GB)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -1025,7 +923,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bandwidth Sent']} />
                         <Area type="monotone" dataKey="value" stroke="#073b4c" fill="url(#bandwidthGradient)" strokeWidth={2} />
-                        <ReferenceLine y={1024} stroke="red" strokeDasharray="5 5" label="Free Limit (1GB)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -1046,7 +943,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <YAxis stroke="#ccc" />
                         <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
                         <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#requestsGradient)" strokeWidth={2} />
-                        <ReferenceLine y={50000} stroke="red" strokeDasharray="5 5" label="Free Limit (50K)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
