@@ -506,7 +506,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName.split(' ')[0]}</h2><p className="text-xs text-success">Online</p></div>
            </div>
            <button onClick={() => setShowSettingsModal(true)} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><Settings size={14} /> Settings</button>
-           {isMobile && <button onClick={handleLogout} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><LogOut size={14} /> Sign Out</button>}
         </header>
 
         <div className="content-body">
@@ -528,7 +527,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }}
                             className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/10 text-white' : ''}`}
                           >
-                            <span className={`transition-opacity ${activeTableTab === tab ? 'opacity-100' : 'opacity-0'}`}><Check size={14} /></span>
+                            {activeTableTab === tab && <Check size={14} />}
                             <span className="flex-1">{tab}</span>
                           </button>
                         ))}
@@ -761,8 +760,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
                     {shots.length > 0 ? (
                        <div className="w-full max-w-4xl flex flex-col gap-4" style={{ height: '100%' }}>
-                          <div className="relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl aspect-video flex items-center justify-center">
-                             <img src={shots[currentShotIndex]?.url} alt="Shot" className="max-w-full max-h-full" style={{ height: '100%' }} />
+                          <div className={`relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl flex items-center justify-center ${isMobile ? 'w-full h-full' : 'aspect-video'}`} style={isMobile ? { width: '100%', height: '100vh' } : { width: '100%', height: '100%' }}>
+                             <img src={shots[currentShotIndex]?.url} alt="Shot" className="max-w-full max-h-full" style={isMobile ? { width: '100%' } : { height: '100%' }} />
                              <button onClick={() => setCurrentShotIndex(p => Math.max(0, p - 1))} disabled={currentShotIndex === 0} className="absolute left-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full disabled:opacity-50"><ArrowLeft /></button>
                              <button onClick={() => setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1))} disabled={currentShotIndex === shots.length - 1} className="absolute right-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full disabled:opacity-50"><ArrowRight /></button>
                           </div>
@@ -776,14 +775,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   </div>
                 </div>
                 {shots.length > 0 && (
-                   <div className="flex justify-between items-center bg-surface p-4 rounded-xl border border-white/10">
+                   <div className={`flex justify-between items-center bg-surface rounded-xl border border-white/10 ${isMobile ? 'p-2 flex-col gap-2' : 'p-4'}`}>
                       <div>
-                         <div className="text-sm font-mono text-muted">{shots[currentShotIndex]?.name}</div>
+                         <div className={`font-mono text-muted ${isMobile ? 'text-xs' : 'text-sm'}`}>{shots[currentShotIndex]?.name}</div>
                          <div className="text-xs text-muted">Owner: <span className="text-white">{shots[currentShotIndex]?.ownerName || 'Unknown'}</span> <span className="font-mono text-muted">({shots[currentShotIndex]?.ownerNumber || 'Unknown'})</span></div>
                       </div>
-                      <div className="flex gap-4 items-center">
-                         <span className="text-sm text-muted">{currentShotIndex + 1} / {shots.length}</span>
-                         <button onClick={handleDeleteShot} className="btn btn-danger h-8 text-xs px-3">Delete</button>
+                      <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-4'}`}>
+                         <span className={`text-muted ${isMobile ? 'text-xs' : 'text-sm'}`}>{currentShotIndex + 1} / {shots.length}</span>
+                         <button onClick={handleDeleteShot} className={`btn btn-danger ${isMobile ? 'h-6 text-xs px-2' : 'h-8 text-xs px-3'}`}>Delete</button>
                       </div>
                    </div>
                 )}
@@ -995,8 +994,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         <div className="modal-overlay">
            <div className="modal-content modal-md p-6">
               <div className="flex justify-between items-center mb-6">
-                 <h3 className="text-xl font-bold text-white">System Settings</h3>
-                 <button onClick={() => setShowSettingsModal(false)} className="btn-icon"><X size={20} /></button>
+                <h3 className={`font-bold text-white ${isMobile ? 'text-lg' : 'text-xl'}`}>System Settings</h3>
+                <button onClick={() => setShowSettingsModal(false)} className="btn-icon"><X size={20} /></button>
               </div>
               <div className="space-y-4 mb-8">
                  <div className="settings-row">
@@ -1012,13 +1011,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </button>
                  </div>
               </div>
-              <div className="flex justify-between items-center">
-                 <button onClick={handleClearAllScreened} className="btn btn-danger">Clear All Screened</button>
-                 <button onClick={async () => {
-                     try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); }
-                     catch (e) { console.warn('Failed to save settings', e); }
-                     setShowSettingsModal(false);
-                 }} className="btn btn-primary">Save Changes</button>
+              <div className={`flex items-center ${isMobile ? 'flex-col gap-4' : 'justify-between'}`}>
+                <button onClick={handleClearAllScreened} className={`btn btn-danger ${isMobile ? 'w-full' : ''}`}>Clear All Screened</button>
+                <button onClick={async () => {
+                  try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); }
+                  catch (e) { console.warn('Failed to save settings', e); }
+                  setShowSettingsModal(false);
+                }} className={`btn btn-primary ${isMobile ? 'w-full' : ''}`}>Save Changes</button>
               </div>
            </div>
         </div>

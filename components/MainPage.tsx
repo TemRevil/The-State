@@ -185,8 +185,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       if ( e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5')) ) { e.preventDefault(); handleViolation(); } };
     const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'PrintScreen') handleViolation(); };
     const handleCopy = (e: ClipboardEvent) => { e.preventDefault(); };
-    window.addEventListener('keydown', handleKeyDown); window.addEventListener('keyup', handleKeyUp); window.addEventListener('copy', handleCopy);
-    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); window.removeEventListener('copy', handleCopy); };
+    const handleTouchStart = (e: TouchEvent) => { if (e.touches.length >= 3) { e.preventDefault(); handleViolation(); } };
+    window.addEventListener('keydown', handleKeyDown); window.addEventListener('keyup', handleKeyUp); window.addEventListener('copy', handleCopy); window.addEventListener('touchstart', handleTouchStart);
+    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); window.removeEventListener('copy', handleCopy); window.removeEventListener('touchstart', handleTouchStart); };
   }, [selectedPdf, violation]);
 
   const loadWeeks = async () => {
