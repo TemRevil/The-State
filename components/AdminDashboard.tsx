@@ -12,15 +12,13 @@ interface SnitchData { id: string; loginNumber: string; snitchNumber: string; sn
 interface BrokerData { id: string; number: string; count: number; date: string; time: string; attempts: { Date: string; Time: string; Password?: string; }[]; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
 
-// Define a union type for the active info modal
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots'>('tables');
    const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
    const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [numbers, setNumbers] = useState<NumberData[]>([]);
-  const [blocked, setBlocked] = useState<BlockedData[]>([]);
+  const [numbers, setNumbers] = useState<NumberData[]>([]);  const [blocked, setBlocked] = useState<BlockedData[]>([]);
      const [snitches, setSnitches] = useState<SnitchData[]>([]);
      const [showInfoModal, setShowInfoModal] = useState(false); // Unified modal visibility
      const [activeInfo, setActiveInfo] = useState<ActiveInfo | null>(null); // Holds the data for the active info display
@@ -28,6 +26,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   const [brokers, setBrokers] = useState<BrokerData[]>([]);
   const [adminName, setAdminName] = useState('Admin');
+  const [blockedNumbers, setBlockedNumbers] = useState<Set<string>>(new Set());
   
   // Files State
   const [files, setFiles] = useState<FileData[]>([]);
@@ -92,14 +91,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     
     // Watch Collections
     const u1 = onSnapshot(collection(db, "Blocked"), s => {
-        setBlocked(s.docs.map(d => ({ 
+        const blockedData = s.docs.map(d => ({ 
             id: d.id, 
             number: d.id, 
             name: d.data().Name || 'Unknown', 
             reason: d.data().Reason || 'Unknown', 
             date: d.data()["Blocked Date"] || '', 
             time: d.data()["Blocked Time"] || ''
-        })));
+        }));
+        setBlocked(blockedData);
+        setBlockedNumbers(new Set(blockedData.map(b => b.number)));
     });
     
     const u2 = onSnapshot(collection(db, "Numbers"), s => {
@@ -137,20 +138,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                };
            }));
            setSnitches(snitchesData);
-       });   const u4 = onSnapshot(collection(db, "Brokers"), s => {
-      setBrokers(s.docs.map(d => {
-        const data = d.data();
-        const attempts = (data.Attempts || []) as { Date: string; Time: string; Password?: string; }[];
-        const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : { Date: '', Time: '' };
-        return {
-          id: d.id,
-          number: data.Number || 'Unknown',
-          count: attempts.length, // Derive count from attempts array length
-          date: lastAttempt.Date,
-          time: lastAttempt.Time,
-          attempts: attempts, // Store full attempts array
-        };
-      }));
+       });
+   
+   const u4 = onSnapshot(collection(db, "Brokers"), s => {
+     setBrokers(s.docs.map(d => {
+       const data = d.data();
+       const attemptsArray = Object.values(data.Attempts || {}) as { Date: string; Time: string; Password?: string; }[];
+       const lastAttempt = attemptsArray.length > 0 ? attemptsArray[attemptsArray.length - 1] : { Date: '', Time: '' };
+       return {
+         id: d.id,
+         number: d.id,
+         count: attemptsArray.length,
+         date: lastAttempt.Date,
+         time: lastAttempt.Time,
+         attempts: attemptsArray,
+       };
+     }));
    });
 
       return () => { u1(); u2(); u3(); u4(); };
@@ -165,18 +168,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   // Effect to fetch login attempts when the modal is shown
   useEffect(() => {
-    if (showNumberInfoModal && selectedNumberForInfo) {
+    if (showInfoModal && activeInfo?.type === 'number') {
       const fetchLoginAttempts = async () => {
         const attempts: LoginAttempt[] = [];
-        const numberDocRef = doc(db, 'Numbers', selectedNumberForInfo.number);
+        const numberDocRef = doc(db, 'Numbers', activeInfo.data.number);
         const numberDocSnap = await getDoc(numberDocRef);
 
         if (numberDocSnap.exists()) {
           const data = numberDocSnap.data();
-          
-          // --- NEW CONSOLE LOGS FOR DEBUGGING ---
-
-          // ------------------------------------
           
           if (data && typeof data === 'object' && data.Devices && typeof data.Devices === 'object' && data.Devices.Archived && typeof data.Devices.Archived === 'object') {
             Object.keys(data.Devices.Archived).forEach(attemptId => {
@@ -198,9 +197,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       };
       fetchLoginAttempts();
     } else {
-      setLoginAttemptsData([]); // Clear data when modal is closed
+      setLoginAttemptsData([]);
     }
-  }, [showNumberInfoModal, selectedNumberForInfo]);
+  }, [showInfoModal, activeInfo]);
 
   const handleLogout = async () => { if (confirm("Logout?")) { await signOut(auth); window.location.reload(); } };
   
@@ -232,7 +231,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
          "Reason": "Blocked by Admin",
          "Name": item.name
       });
-      await deleteDoc(doc(db, "Numbers", item.number));
       setActiveDropdown(null);
     } catch (e) { console.error(e); }
   };
@@ -506,16 +504,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 <div className="absolute inset-0 overflow-auto custom-scrollbar">
                   <table className="admin-table">
                     <thead>
-                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Quiz Times</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th className="text-right">Actions</th></>)}</tr>
+                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Quiz Times</th><th>Screened</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th>Status</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>)}</tr>
                     </thead>
                     <tbody>
-                                 {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
+                        {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
                         <tr key={item.id}>
-                                       {activeTableTab === 'numbers' && (
+                            {activeTableTab === 'numbers' && (
                             <>
                               <td className="font-mono text-muted">{(item as NumberData).number}</td>
                               <td className="font-medium text-white">{(item as NumberData).name}</td>
                               <td><span className="px-2 py-1 rounded text-xs font-bold bg-white/5 text-white">{(item as NumberData).quizTimes}</span></td>
+                              <td><span className="px-2 py-1 rounded text-xs font-bold bg-white/5 text-white">{(item as NumberData).screenedCount}</span></td>
                               <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).quizEnabled ? 'text-success bg-success/10' : 'text-muted bg-white/5'}`}>{(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</span></td>
                               <td><span className={`px-2 py-1 rounded text-xs font-medium ${(item as NumberData).pdfDown ? 'text-success bg-success/10' : 'text-error bg-error/10'}`}>{(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</span></td>
                               <td className="text-right relative">
@@ -524,10 +523,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                  </div>
                                  {activeDropdown === item.id && (
                                    <div className="options-menu">
-                                     <button onClick={() => handleBlockNumber(item as NumberData)} className="options-item warning"><Ban size={14} /> Block Number</button>
+                                     {!blockedNumbers.has((item as NumberData).number) && <button onClick={() => handleBlockNumber(item as NumberData)} className="options-item warning"><Ban size={14} /> Block Number</button>}
                                      <button onClick={() => handleToggleQuiz(item as NumberData)} className="options-item"><BookOpen size={14} /> Quiz: {(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</button>
-                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button>
-                                     <button onClick={() => { setSelectedNumberForInfo(item as NumberData); setShowNumberInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
+                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button><button onClick={() => { setActiveInfo({ type: 'number', data: item as NumberData }); setShowInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
                                      <div className="options-divider" />
                                      <button onClick={() => handleDeleteNumber(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                    </div>
@@ -541,6 +539,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                 <td className="font-medium text-white">{(item as BlockedData).name}</td>
                                 <td className="text-sm text-error">{(item as BlockedData).reason}</td>
                                 <td className="text-xs text-muted">{(item as BlockedData).date} {(item as BlockedData).time}</td>
+                                <td><span className={`px-2 py-1 rounded text-xs font-medium text-error bg-error/10`}>Blocked</span></td>
                                 <td className="text-right relative">
                                    <div className="flex justify-end">
                                       <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
@@ -559,14 +558,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                              <>
                                 <td className="font-mono text-muted">{(item as SnitchData).loginNumber}</td>
                                 <td className="font-mono text-error">{(item as SnitchData).snitchNumber}</td>
-                                <td className="text-white">{(item as SnitchData).snitchName}</td>                                <td className="text-xs text-muted">{(item as SnitchData).date} {(item as SnitchData).time}</td>
+                                <td className="text-white">{(item as SnitchData).snitchName}</td>
+                                <td className="text-xs text-muted">{(item as SnitchData).date} {(item as SnitchData).time}</td>
+                                <td>
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${blockedNumbers.has((item as SnitchData).snitchNumber) ? 'text-error bg-error/10' : 'text-success bg-success/10'}`}>
+                                        {blockedNumbers.has((item as SnitchData).snitchNumber) ? 'Blocked' : 'Normal'}
+                                    </span>
+                                </td>
                                 <td className="text-right relative">
                                    <div className="flex justify-end">
                                       <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
                                    </div>
                                    {activeDropdown === item.id && (
                                       <div className="options-menu" style={{ width: '160px' }}>
-                                         <button onClick={() => handleBlockSnitch(item as SnitchData)} className="options-item warning"><Ban size={14} /> Block Snitch</button>
+                                         {!blockedNumbers.has((item as SnitchData).snitchNumber) && <button onClick={() => handleBlockSnitch(item as SnitchData)} className="options-item warning"><Ban size={14} /> Block Snitch</button>}
                                          <div className="options-divider" />
                                          <button onClick={() => handleDeleteSnitch(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                       </div>
@@ -576,17 +581,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           )}
                           {activeTableTab === 'brokers' && (
                              <>
-                                                                 <td className="font-mono text-muted">{(item as BrokerData).number}</td>
-                                                                 <td className="text-sm text-error">{(item as BrokerData).count}</td>
-                                                                 <td className="text-sm text-white">{(item as BrokerData).date}</td>                                <td className="text-xs text-muted">{(item as BrokerData).time}</td>
+                                <td className="font-mono text-muted">{(item as BrokerData).number}</td>
+                                <td className="text-sm text-error">{(item as BrokerData).count}</td>
+                                <td className="text-sm text-white">{(item as BrokerData).date}</td>
+                                <td className="text-xs text-muted">{(item as BrokerData).time}</td>
+                                <td>
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${blockedNumbers.has((item as BrokerData).number) ? 'text-error bg-error/10' : 'text-success bg-success/10'}`}>
+                                        {blockedNumbers.has((item as BrokerData).number) ? 'Blocked' : 'Normal'}
+                                    </span>
+                                </td>
                                 <td className="text-right relative">
                                    <div className="flex justify-end">
                                       <button onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === item.id ? null : item.id); }} className="btn-icon w-8 h-8"><MoreVertical size={16} /></button>
                                    </div>
                                    {activeDropdown === item.id && (
                                       <div className="options-menu" style={{ width: '160px' }}>
-                                       <button onClick={() => { setSelectedBrokerForInfo(item as BrokerData); setShowBrokerInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
-                                         <button onClick={() => handleBlockBroker(item as BrokerData)} className="options-item warning"><Ban size={14} /> Block Broker</button>
+                                       <button onClick={() => { setActiveInfo({ type: 'broker', data: item as BrokerData }); setShowInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
+                                         {!blockedNumbers.has((item as BrokerData).number) && <button onClick={() => handleBlockBroker(item as BrokerData)} className="options-item warning"><Ban size={14} /> Block Broker</button>}
                                          <div className="options-divider" />
                                          <button onClick={async () => { if (confirm('Delete record?')) { await deleteDoc(doc(db, 'Brokers', (item as BrokerData).id)); setActiveDropdown(null); } }} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                       </div>
@@ -712,18 +723,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       </main>
 
       {/* NUMBER INFO MODAL */}
-      {showNumberInfoModal && selectedNumberForInfo && (
+      {showInfoModal && activeInfo?.type === 'number' && (
         <div className="modal-overlay animate-fade-in">
           <div className="modal-content modal-lg p-0 relative flex flex-col">
             {/* 1. Header */}
             <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
-              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
+              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
               <div className="flex flex-col items-center w-full">
                 <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
                   <BookOpen size={28} />
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">Number Info</h2>
-                <p className="text-muted text-sm text-center">Login attempts for: <span className="font-mono text-white">{selectedNumberForInfo.number}</span></p>
+                <p className="text-muted text-sm text-center">Login attempts for: <span className="font-mono text-white">{activeInfo.data.number}</span></p>
               </div>
             </div>
 
@@ -763,7 +774,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
             {/* 3. Footer */}
             <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
-              <button onClick={() => { setShowNumberInfoModal(false); setSelectedNumberForInfo(null); }} className="btn btn-secondary w-full">
+              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">
                 Close
               </button>
             </div>
@@ -772,25 +783,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       )}
 
       {/* BROKER INFO MODAL */}
-      {showBrokerInfoModal && selectedBrokerForInfo && (
+      {showInfoModal && activeInfo?.type === 'broker' && (
         <div className="modal-overlay animate-fade-in">
           <div className="modal-content modal-lg p-0 relative flex flex-col">
             {/* 1. Header */}
             <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
-              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
+              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
               <div className="flex flex-col items-center w-full">
                 <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
                   <BookOpen size={28} />
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">Broker Info</h2>
-                <p className="text-muted text-sm text-center">Attempts for: <span className="font-mono text-white">{selectedBrokerForInfo.number}</span></p>
+                <p className="text-muted text-sm text-center">Attempts for: <span className="font-mono text-white">{activeInfo.data.number}</span> <span className="text-xs bg-white/10 text-white font-bold px-2 py-1 rounded-md ml-2">{activeInfo.data.count}</span></p>
               </div>
             </div>
             
             {/* 2. Scrollable Body */}
             <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
               <div className="p-6 md:p-8">
-                {selectedBrokerForInfo.attempts.length > 0 ? (
+                {activeInfo.data.attempts.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="admin-table w-full">
                       <thead>
@@ -801,7 +812,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         </tr>
                       </thead>
                       <tbody>
-                        {[...selectedBrokerForInfo.attempts].reverse().map((attempt, index) => (
+                        {[...activeInfo.data.attempts].reverse().map((attempt, index) => (
                           <tr key={index}>
                             <td className="font-mono text-white select-text">{attempt.Password || 'N/A'}</td>
                             <td className="text-muted">{attempt.Date}</td>
@@ -821,7 +832,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
             {/* 3. Footer */}
             <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
-              <button onClick={() => { setShowBrokerInfoModal(false); setSelectedBrokerForInfo(null); }} className="btn btn-secondary w-full">
+              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">
                 Close
               </button>
             </div>

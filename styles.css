@@ -325,10 +325,13 @@ button, input { font-family: inherit; font-size: inherit; }
     flex-direction: column;
     align-items: stretch;
   }
+  .md-flex { display: none; }
 }
 
 @media (min-width: 901px) {
   .mobile-toggle { display: none; }
+  .md-hidden { display: none; }
+  .md-flex { display: flex; }
 }
 
 /* Backdrop used when sidebar is open on mobile to close when clicking outside */

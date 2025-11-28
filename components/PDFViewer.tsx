@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { X, Download, Loader2, AlertCircle, ZoomIn, ZoomOut, FileText } from 'lucide-react';
 import { storage } from '../firebaseConfig';
 import { ref, getBytes } from 'firebase/storage';
@@ -27,6 +27,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const pageCanvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
+
+  const [isMobile, setIsMobile] = useState(false);
+
+  useLayoutEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Load PDF from Firebase
   useEffect(() => {
@@ -286,23 +295,27 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
           {/* Zoom Controls */}
           {pdfDoc && totalPages > 0 && (
             <div className="flex items-center gap-2 px-6 py-3 border-t border-white/10 bg-surface/50 shrink-0">
-              <button
-                onClick={handleZoomOut}
-                disabled={zoom <= 0.5}
-                className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
-                title="Zoom out"
-              >
-                <ZoomOut size={18} />
-              </button>
-              <span className="text-muted text-sm min-w-[60px] text-center">{Math.round(zoom * 100)}%</span>
-              <button
-                onClick={handleZoomIn}
-                disabled={zoom >= 3}
-                className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
-                title="Zoom in"
-              >
-                <ZoomIn size={18} />
-              </button>
+              {!isMobile && (
+                <>
+                  <button
+                    onClick={handleZoomOut}
+                    disabled={zoom <= 0.5}
+                    className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
+                    title="Zoom out"
+                  >
+                    <ZoomOut size={18} />
+                  </button>
+                  <span className="text-muted text-sm min-w-[60px] text-center">{Math.round(zoom * 100)}%</span>
+                  <button
+                    onClick={handleZoomIn}
+                    disabled={zoom >= 3}
+                    className="btn-icon disabled:opacity-50 disabled:cursor-not-allowed hover:text-primary"
+                    title="Zoom in"
+                  >
+                    <ZoomIn size={18} />
+                  </button>
+                </>
+              )}
               <div className="flex-1" />
               <span className="text-muted text-xs">{totalPages} pages</span>
             </div>
@@ -349,4 +362,3 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     </div>
   );
 };
-
