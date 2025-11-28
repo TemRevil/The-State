@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, storage, auth } from '../firebaseConfig';
+import { db, storage, auth, functions } from '../firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
-import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -15,7 +17,18 @@ interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; ur
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
-  const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots'>('tables');
+  // Firebase Limits
+  const FIRESTORE_DAILY_READS_LIMIT = 0;
+  const FIRESTORE_DAILY_WRITES_LIMIT = 0;
+  const FIRESTORE_DAILY_DELETES_LIMIT = 0;
+  const FIRESTORE_MONTHLY_READS_LIMIT = 0;
+  const FIRESTORE_MONTHLY_WRITES_LIMIT = FIRESTORE_DAILY_WRITES_LIMIT * 0;
+  const FIRESTORE_MONTHLY_DELETES_LIMIT = FIRESTORE_DAILY_DELETES_LIMIT * 0;
+  const STORAGE_MONTHLY_BYTES_LIMIT = 0 * 1024 * 1024 * 1024; // 5GB in bytes
+  const STORAGE_MONTHLY_BANDWIDTH_LIMIT = 0 * 1024 * 1024 * 1024; // 1GB in bytes
+  const STORAGE_MONTHLY_REQUESTS_LIMIT = 1;
+
+  const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
    const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
    const [sidebarOpen, setSidebarOpen] = useState(false);
   const [numbers, setNumbers] = useState<NumberData[]>([]);  const [blocked, setBlocked] = useState<BlockedData[]>([]);
@@ -37,6 +50,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   const [shots, setShots] = useState<any[]>([]);
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
+  const [firebaseUsage, setFirebaseUsage] = useState<{ firestore: any; storage: any } | null>(null);
+  const [limitsExceeded, setLimitsExceeded] = useState(false);
+  const [appBlocked, setAppBlocked] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -169,6 +185,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     const handleResize = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Effect to check limits on app start
+  useEffect(() => {
+    const checkLimits = async () => {
+      try {
+        const getUsage = httpsCallable(functions, 'getFirebaseUsage');
+        const result = await getUsage();
+        setFirebaseUsage(result.data as any);
+
+        // Check if limits exceeded
+        const data = result.data as any;
+        const reads = data.firestore.reads.reduce((sum: number, p: any) => sum + p.value, 0);
+        const writes = data.firestore.writes.reduce((sum: number, p: any) => sum + p.value, 0);
+        const deletes = data.firestore.deletes.reduce((sum: number, p: any) => sum + p.value, 0);
+        const bytes = data.storage.bytesStored[0]?.value * 1024 * 1024 || 0; // Convert MB to bytes
+        const bandwidth = data.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0) * 1024 * 1024; // MB to bytes
+        const requests = data.storage.requests.reduce((sum: number, p: any) => sum + p.value, 0);
+
+        const exceeded = reads > FIRESTORE_MONTHLY_READS_LIMIT ||
+                         writes > FIRESTORE_MONTHLY_WRITES_LIMIT ||
+                         deletes > FIRESTORE_MONTHLY_DELETES_LIMIT ||
+                         bytes > STORAGE_MONTHLY_BYTES_LIMIT ||
+                         bandwidth > STORAGE_MONTHLY_BANDWIDTH_LIMIT ||
+                         requests > STORAGE_MONTHLY_REQUESTS_LIMIT;
+
+        setLimitsExceeded(exceeded);
+        setAppBlocked(exceeded);
+      } catch (error) {
+        console.error('Failed to check limits:', error);
+        // If can't check, allow access for now
+      }
+    };
+    checkLimits();
   }, []);
 
   // Effect to fetch login attempts when the modal is shown
@@ -458,6 +508,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
    };
    useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
 
+   // Fetch Firebase usage
+   useEffect(() => {
+     if (activeSection === 'firebase') {
+       const fetchUsage = async () => {
+         try {
+           const getUsage = httpsCallable(functions, 'getFirebaseUsage');
+           const result = await getUsage();
+           setFirebaseUsage(result.data as any);
+
+           // Check if limits exceeded
+           const data = result.data as any;
+           const reads = data.firestore.reads.reduce((sum: number, p: any) => sum + p.value, 0);
+           const writes = data.firestore.writes.reduce((sum: number, p: any) => sum + p.value, 0);
+           const deletes = data.firestore.deletes.reduce((sum: number, p: any) => sum + p.value, 0);
+           const bytes = data.storage.bytesStored[0]?.value * 1024 * 1024 || 0; // Convert MB to bytes
+           const bandwidth = data.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0) * 1024 * 1024; // MB to bytes
+           const requests = data.storage.requests.reduce((sum: number, p: any) => sum + p.value, 0);
+
+           const exceeded = reads > FIRESTORE_MONTHLY_READS_LIMIT ||
+                            writes > FIRESTORE_MONTHLY_WRITES_LIMIT ||
+                            deletes > FIRESTORE_MONTHLY_DELETES_LIMIT ||
+                            bytes > STORAGE_MONTHLY_BYTES_LIMIT ||
+                            bandwidth > STORAGE_MONTHLY_BANDWIDTH_LIMIT ||
+                            requests > STORAGE_MONTHLY_REQUESTS_LIMIT;
+
+           setLimitsExceeded(exceeded);
+         } catch (error) {
+           console.error('Failed to fetch Firebase usage:', error);
+         }
+       };
+       fetchUsage();
+     }
+   }, [activeSection]);
+
    // Keyboard navigation for shots
    useEffect(() => {
      if (activeSection !== 'shots') return;
@@ -475,6 +559,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
 
+  if (appBlocked) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="bg-surface border border-error/20 p-8 rounded-xl max-w-md text-center shadow-2xl">
+          <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <ShieldAlert size={32} className="text-error" />
+          </div>
+          <h2 className="text-2xl font-bold text-error mb-4">Firebase Limits Exceeded</h2>
+          <p className="text-muted mb-6">
+            You have exceeded your Firebase free tier limits. To continue using the application, please upgrade your Firebase plan.
+          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-muted">Limits checked:</p>
+            <ul className="text-sm text-muted text-left space-y-1">
+              <li>• Firestore: 1.5M reads, 600K writes, 600K deletes per month</li>
+              <li>• Storage: 5GB storage, 1GB bandwidth, 50K requests per month</li>
+            </ul>
+          </div>
+          <button onClick={() => window.location.reload()} className="btn btn-primary mt-6 w-full">
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       {/* SIDEBAR */}
@@ -487,6 +597,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           <button onClick={() => setActiveSection('tables')} className={`nav-btn admin-nav-btn ${activeSection === 'tables' ? 'active' : ''}`}><LayoutGrid size={18} /> Tables</button>
           <button onClick={() => setActiveSection('files')} className={`nav-btn admin-nav-btn ${activeSection === 'files' ? 'active' : ''}`}><FolderOpen size={18} /> Files</button>
           <button onClick={() => setActiveSection('shots')} className={`nav-btn admin-nav-btn ${activeSection === 'shots' ? 'active' : ''}`}><Camera size={18} /> Shots</button>
+          <button onClick={() => setActiveSection('firebase')} className={`nav-btn admin-nav-btn ${activeSection === 'firebase' ? 'active' : ''}`}><Database size={18} /> Firebase</button>
         </nav>
         <div className="p-4 border-t border-white/10 flex flex-col gap-2">
            <button onClick={onBack} className="nav-btn"><ArrowLeft size={16} /> Back to User View</button>
@@ -787,6 +898,142 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                    </div>
                 )}
              </div>
+          )}
+
+          {activeSection === 'firebase' && (
+            <div className="h-full flex flex-col gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-1 gap-6">
+                <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><Database size={20} /> User Count</h3>
+                  <div className="text-3xl font-bold text-primary">{numbers.length}</div>
+                  <p className="text-sm text-muted">Total registered users</p>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Reads ({(() => { const total = firebaseUsage?.firestore?.reads?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.firestore?.reads || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="readsGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#ef476f" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#ef476f" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" />
+                        <YAxis stroke="#ccc" />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
+                        <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#readsGradient)" strokeWidth={2} />
+                        <ReferenceLine y={1500000} stroke="red" strokeDasharray="5 5" label="Free Limit (1.5M)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Writes ({(() => { const total = firebaseUsage?.firestore?.writes?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.firestore?.writes || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="writesGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#ffd166" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#ffd166" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" />
+                        <YAxis stroke="#ccc" />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
+                        <Area type="monotone" dataKey="value" stroke="#ffd166" fill="url(#writesGradient)" strokeWidth={2} />
+                        <ReferenceLine y={600000} stroke="red" strokeDasharray="5 5" label="Free Limit (600K)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Deletes ({(() => { const total = firebaseUsage?.firestore?.deletes?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.firestore?.deletes || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="deletesGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#06d6a0" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#06d6a0" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" />
+                        <YAxis stroke="#ccc" />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
+                        <Area type="monotone" dataKey="value" stroke="#06d6a0" fill="url(#deletesGradient)" strokeWidth={2} />
+                        <ReferenceLine y={600000} stroke="red" strokeDasharray="5 5" label="Free Limit (600K)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Storage Bytes Stored ({firebaseUsage?.storage?.bytesStored?.[firebaseUsage.storage.bytesStored.length - 1]?.value ? firebaseUsage.storage.bytesStored[firebaseUsage.storage.bytesStored.length - 1].value.toFixed(2) + ' MB' : '0 MB'})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.storage?.bytesStored || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="bytesGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#118ab2" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#118ab2" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" interval={0} angle={-45} textAnchor="end" height={60} />
+                        <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bytes Stored']} />
+                        <Area type="monotone" dataKey="value" stroke="#118ab2" fill="url(#bytesGradient)" strokeWidth={2} />
+                        <ReferenceLine y={5120} stroke="red" strokeDasharray="5 5" label="Free Limit (5GB)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Storage Bandwidth Sent ({firebaseUsage?.storage?.bandwidthSent?.reduce((sum: number, p: any) => sum + p.value, 0) ? firebaseUsage.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0).toFixed(2) + ' MB' : '0 MB'})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.storage?.bandwidthSent || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="bandwidthGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#073b4c" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#073b4c" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" interval={0} angle={-45} textAnchor="end" height={60} />
+                        <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bandwidth Sent']} />
+                        <Area type="monotone" dataKey="value" stroke="#073b4c" fill="url(#bandwidthGradient)" strokeWidth={2} />
+                        <ReferenceLine y={1024} stroke="red" strokeDasharray="5 5" label="Free Limit (1GB)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <h3 className="text-lg font-semibold text-white mb-4">Storage Requests ({(() => { const total = firebaseUsage?.storage?.requests?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={(firebaseUsage?.storage?.requests || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
+                        <defs>
+                          <linearGradient id="requestsGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#ef476f" stopOpacity={0.8} />
+                            <stop offset="100%" stopColor="#ef476f" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="date" stroke="#ccc" />
+                        <YAxis stroke="#ccc" />
+                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
+                        <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#requestsGradient)" strokeWidth={2} />
+                        <ReferenceLine y={50000} stroke="red" strokeDasharray="5 5" label="Free Limit (50K)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </main>
