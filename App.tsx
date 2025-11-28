@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import './components/arabicFontDetector.js';
 import { LoginPage } from './components/LoginPage';
-import { DashboardPage } from './components/DashboardPage';
+import { MainPage } from './components/MainPage';
 import { AdminDashboard } from './components/AdminDashboard';
 import { auth } from './firebaseConfig';
 
@@ -100,12 +100,12 @@ const App: React.FC = () => {
             <LoginPage onLoginSuccess={handleLoginSuccess} />
           </div>
         ) : currentView === 'dashboard' ? (
-          <DashboardPage 
-            onLogout={handleLogout} 
-            onNavigateAdmin={() => setCurrentView('admin')}
-            isAdmin={isAdmin}
-          />
-        ) : (
+           <MainPage
+             onLogout={handleLogout}
+             onNavigateAdmin={() => setCurrentView('admin')}
+             isAdmin={isAdmin}
+           />
+         ) : (
           <AdminDashboard onBack={() => setCurrentView('dashboard')} />
         )}
       </div>

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, storage, auth } from '../firebaseConfig';
-import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
-import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff } from 'lucide-react';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -41,6 +41,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showFolderModal, setShowFolderModal] = useState(false);
+  const [folderName, setFolderName] = useState('');
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [onConfirmAction, setOnConfirmAction] = useState<() => void>(() => {});
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [showTableNavMenu, setShowTableNavMenu] = useState(false);
   const [showFileNavMenu, setShowFileNavMenu] = useState(false);
@@ -201,7 +206,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     }
   }, [showInfoModal, activeInfo]);
 
-  const handleLogout = async () => { if (confirm("Logout?")) { await signOut(auth); window.location.reload(); } };
+  const showConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setOnConfirmAction(() => action);
+    setShowConfirmModal(true);
+  };
+
+  const handleLogout = async () => { showConfirm("Logout?", async () => { await signOut(auth); window.location.reload(); }); };
   
   // --- NUMBER ACTIONS ---
   const handleCreateUser = async () => {
@@ -219,20 +230,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     } catch (e) { console.error(e); }
   };
 
-  const handleDeleteNumber = async (id: string) => { if (confirm("Delete?")) { try { await deleteDoc(doc(db, "Numbers", id.trim())); } catch {} finally { setActiveDropdown(null); } } };
+  const handleDeleteNumber = async (id: string) => { showConfirm("Delete?", async () => { try { await deleteDoc(doc(db, "Numbers", id.trim())); } catch {} finally { setActiveDropdown(null); } }); };
   
   const handleBlockNumber = async (item: NumberData) => {
-    if (!confirm(`Block ${item.name || item.number}?`)) return;
-    const now = new Date();
-    try {
-      await setDoc(doc(db, "Blocked", item.number), {
-         "Blocked Date": now.toLocaleDateString("en-GB"),
-         "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-         "Reason": "Blocked by Admin",
-         "Name": item.name
-      });
-      setActiveDropdown(null);
-    } catch (e) { console.error(e); }
+    showConfirm(`Block ${item.name || item.number}?`, async () => {
+      const now = new Date();
+      try {
+        await setDoc(doc(db, "Blocked", item.number), {
+           "Blocked Date": now.toLocaleDateString("en-GB"),
+           "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
+           "Reason": "Blocked by Admin",
+           "Name": item.name
+        });
+        setActiveDropdown(null);
+      } catch (e) { console.error(e); }
+    });
   };
 
   const handleToggleQuiz = async (item: NumberData) => {
@@ -249,78 +261,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       } catch (e) { console.error(e); }
   };
 
-  // --- BLOCKED ACTIONS ---
-  const handleUnblock = async (item: BlockedData) => {
-      if (!confirm(`Unblock ${item.number}?`)) return;
+  const handleClearScreen = async (item: NumberData) => {
       try {
-        await setDoc(doc(db, "Numbers", item.number), {
-            "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {"Devices Allowed": 1}
-        });
-        await deleteDoc(doc(db, "Blocked", item.number));
+        await updateDoc(doc(db, "Numbers", item.number), { Screened: 0 });
         setActiveDropdown(null);
       } catch (e) { console.error(e); }
   };
 
+  const handleClearAllScreened = async () => {
+    showConfirm("Clear all screened counts for all users?", async () => {
+      try {
+        const numbersSnap = await getDocs(collection(db, "Numbers"));
+        const updates = numbersSnap.docs.map(doc => updateDoc(doc.ref, { Screened: 0 }));
+        await Promise.all(updates);
+      } catch (e) { console.error(e); }
+    });
+  };
+
+  // --- BLOCKED ACTIONS ---
+  const handleUnblock = async (item: BlockedData) => {
+      showConfirm(`Unblock ${item.number}?`, async () => {
+        try {
+          await setDoc(doc(db, "Numbers", item.number), {
+              "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {"Devices Allowed": 1}
+          });
+          await deleteDoc(doc(db, "Blocked", item.number));
+          setActiveDropdown(null);
+        } catch (e) { console.error(e); }
+      });
+  };
+
   const handleDeleteBlocked = async (id: string) => {
-      if(confirm("Delete record?")) {
+      showConfirm("Delete record?", async () => {
         await deleteDoc(doc(db, "Blocked", id));
         setActiveDropdown(null);
-      }
+      });
   };
 
   // --- SNITCH ACTIONS ---
   const handleBlockSnitch = async (item: SnitchData) => {
-      if (!confirm(`Block Snitch ${item.snitchNumber}?`)) return;
-      const now = new Date();
-      try {
-        let name = item.snitchName;
-        if (!name || name === 'Unknown') {
-             try {
-                 const d = await getDoc(doc(db, "Numbers", item.snitchNumber));
-                 if(d.exists()) name = d.data().Name;
-             } catch {}
-        }
-        await setDoc(doc(db, "Blocked", item.snitchNumber), {
-            "Blocked Date": now.toLocaleDateString("en-GB"),
-            "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-            "Reason": `Snitched on ${item.loginNumber}`,
-            "Name": name || 'Unknown'
-        });
-        try { await deleteDoc(doc(db, "Numbers", item.snitchNumber)); } catch {}
-        setActiveDropdown(null);
-      } catch (e) { console.error(e); }
+      showConfirm(`Block Snitch ${item.snitchNumber}?`, async () => {
+        const now = new Date();
+        try {
+          let name = item.snitchName;
+          if (!name || name === 'Unknown') {
+               try {
+                   const d = await getDoc(doc(db, "Numbers", item.snitchNumber));
+                   if(d.exists()) name = d.data().Name;
+               } catch {}
+          }
+          await setDoc(doc(db, "Blocked", item.snitchNumber), {
+              "Blocked Date": now.toLocaleDateString("en-GB"),
+              "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
+              "Reason": `Snitched on ${item.loginNumber}`,
+              "Name": name || 'Unknown'
+          });
+          try { await deleteDoc(doc(db, "Numbers", item.snitchNumber)); } catch {}
+          setActiveDropdown(null);
+        } catch (e) { console.error(e); }
+      });
   };
 
   const handleDeleteSnitch = async (id: string) => {
-      if(confirm("Delete record?")) {
+      showConfirm("Delete record?", async () => {
         await deleteDoc(doc(db, "Snitches", id));
         setActiveDropdown(null);
-      }
+      });
   };
 
   // --- BROKER ACTIONS ---
   const handleBlockBroker = async (item: BrokerData) => {
-    if (!confirm(`Block Broker ${item.number}?`)) return;
-    const now = new Date();
-    try {
-        let name = "Unknown"; // Brokers table doesn't have name directly, need to fetch if exists in Numbers
-        try {
-            const d = await getDoc(doc(db, "Numbers", item.number));
-            if (d.exists()) name = d.data().Name || "Unknown";
-        } catch (e) { console.warn("Failed to get name for broker from Numbers", e); }
+    showConfirm(`Block Broker ${item.number}?`, async () => {
+      const now = new Date();
+      try {
+          let name = "Unknown"; // Brokers table doesn't have name directly, need to fetch if exists in Numbers
+          try {
+              const d = await getDoc(doc(db, "Numbers", item.number));
+              if (d.exists()) name = d.data().Name || "Unknown";
+          } catch (e) { console.warn("Failed to get name for broker from Numbers", e); }
 
-        await setDoc(doc(db, "Blocked", item.number), {
-            "Blocked Date": now.toLocaleDateString("en-GB"),
-            "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-            "Reason": `Blocked as Broker`,
-            "Name": name
-        });
-        // Also delete from Brokers collection
-        await deleteDoc(doc(db, "Brokers", item.id)); // Assuming item.id is the document ID in Brokers
-        try { await deleteDoc(doc(db, "Numbers", item.number)); } catch {} // Optional: remove from Numbers too
+          await setDoc(doc(db, "Blocked", item.number), {
+              "Blocked Date": now.toLocaleDateString("en-GB"),
+              "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
+              "Reason": `Blocked as Broker`,
+              "Name": name
+          });
+          // Also delete from Brokers collection
+          await deleteDoc(doc(db, "Brokers", item.id)); // Assuming item.id is the document ID in Brokers
+          try { await deleteDoc(doc(db, "Numbers", item.number)); } catch {} // Optional: remove from Numbers too
 
-        setActiveDropdown(null);
-    } catch (e) { console.error(e); }
+          setActiveDropdown(null);
+      } catch (e) { console.error(e); }
+    });
   };
 
 
@@ -359,7 +391,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       }
   };
 
-  const handleCreateFolder = async (name: string) => { try { await uploadBytes(ref(storage, `${currentPath ? currentPath + '/' : ''}${name}/.placeholder`), new Blob([''])); setShowFolderModal(false); loadFiles(currentPath); } catch {} };
+  const handleCreateFolder = async (name: string) => { try { await uploadBytes(ref(storage, `${currentPath ? currentPath + '/' : ''}${name}/.placeholder`), new Blob([''])); setShowFolderModal(false); setFolderName(''); loadFiles(currentPath); } catch {} };
+
+  const handleUploadFile = async (file: File) => { try { const path = `${currentPath ? currentPath + '/' : ''}${file.name}`; await uploadBytes(ref(storage, path), file); loadFiles(currentPath); } catch (e) { console.error(e); } };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type === 'application/pdf') {
+      await handleUploadFile(file);
+      e.target.value = '';
+    }
+  };
 
   // File Selection
   const toggleFileSelection = (path: string) => {
@@ -380,18 +422,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   };
 
   const handleBulkFileDelete = async () => {
-      if (!confirm(`Delete ${selectedFiles.length} items? This cannot be undone.`)) return;
-      
-      for (const path of selectedFiles) {
-          const file = files.find(f => f.fullPath === path);
-          if (file?.type === 'folder') {
-             await deleteFolderRecursive(path);
-          } else {
-             try { await deleteObject(ref(storage, path)); } catch {}
-          }
-      }
-      setSelectedFiles([]);
-      loadFiles(currentPath);
+      showConfirm(`Delete ${selectedFiles.length} items? This cannot be undone.`, async () => {
+        for (const path of selectedFiles) {
+            const file = files.find(f => f.fullPath === path);
+            if (file?.type === 'folder') {
+               await deleteFolderRecursive(path);
+            } else {
+               try { await deleteObject(ref(storage, path)); } catch {}
+            }
+        }
+        setSelectedFiles([]);
+        loadFiles(currentPath);
+      });
   };
 
   // --- SHOTS LOGIC ---
@@ -415,7 +457,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       } catch (e) { console.warn('Load shots failed', e); }
    };
    useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
-  const handleDeleteShot = async () => { if (confirm("Delete?")) try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch {} };
+
+   // Keyboard navigation for shots
+   useEffect(() => {
+     if (activeSection !== 'shots') return;
+     const handleKeyDown = (e: KeyboardEvent) => {
+       if (e.key === 'ArrowLeft') {
+         setCurrentShotIndex(p => Math.max(0, p - 1));
+       } else if (e.key === 'ArrowRight') {
+         setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1));
+       }
+     };
+     window.addEventListener('keydown', handleKeyDown);
+     return () => window.removeEventListener('keydown', handleKeyDown);
+   }, [activeSection, shots.length]);
+  const handleDeleteShot = async () => { showConfirm("Delete?", async () => { try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch {} }); };
 
   const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
 
@@ -450,6 +506,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName.split(' ')[0]}</h2><p className="text-xs text-success">Online</p></div>
            </div>
            <button onClick={() => setShowSettingsModal(true)} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><Settings size={14} /> Settings</button>
+           {isMobile && <button onClick={handleLogout} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><LogOut size={14} /> Sign Out</button>}
         </header>
 
         <div className="content-body">
@@ -525,7 +582,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                    <div className="options-menu">
                                      {!blockedNumbers.has((item as NumberData).number) && <button onClick={() => handleBlockNumber(item as NumberData)} className="options-item warning"><Ban size={14} /> Block Number</button>}
                                      <button onClick={() => handleToggleQuiz(item as NumberData)} className="options-item"><BookOpen size={14} /> Quiz: {(item as NumberData).quizEnabled ? 'ON' : 'OFF'}</button>
-                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button><button onClick={() => { setActiveInfo({ type: 'number', data: item as NumberData }); setShowInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
+                                     <button onClick={() => handleTogglePdf(item as NumberData)} className="options-item"><Download size={14} /> PDF: {(item as NumberData).pdfDown ? 'Allowed' : 'Blocked'}</button>
+                                     <button onClick={() => handleClearScreen(item as NumberData)} className="options-item"><EyeOff size={14} /> Clear Screen</button>
+                                     <button onClick={() => { setActiveInfo({ type: 'number', data: item as NumberData }); setShowInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
                                      <div className="options-divider" />
                                      <button onClick={() => handleDeleteNumber(item.id)} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                    </div>
@@ -599,7 +658,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                                        <button onClick={() => { setActiveInfo({ type: 'broker', data: item as BrokerData }); setShowInfoModal(true); setActiveDropdown(null); }} className="options-item"><BookOpen size={14} /> Info</button>
                                          {!blockedNumbers.has((item as BrokerData).number) && <button onClick={() => handleBlockBroker(item as BrokerData)} className="options-item warning"><Ban size={14} /> Block Broker</button>}
                                          <div className="options-divider" />
-                                         <button onClick={async () => { if (confirm('Delete record?')) { await deleteDoc(doc(db, 'Brokers', (item as BrokerData).id)); setActiveDropdown(null); } }} className="options-item danger"><Trash2 size={14} /> Delete</button>
+                                         <button onClick={() => showConfirm('Delete record?', async () => { await deleteDoc(doc(db, 'Brokers', (item as BrokerData).id)); setActiveDropdown(null); })} className="options-item danger"><Trash2 size={14} /> Delete</button>
                                       </div>
                                    )}
                                 </td>
@@ -630,7 +689,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         <button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button>
                      </div>
                      <button onClick={() => setShowFolderModal(true)} className="btn btn-secondary btn-toolbar"><FolderOpen size={16} /> New Folder</button>
-                     <button onClick={() => setShowUploadModal(true)} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
+                     <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
                    </div>
                 </div>
                 
@@ -697,26 +756,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           )}
           
           {activeSection === 'shots' && (
-             <div className="h-full flex flex-col items-center justify-center">
-                {shots.length > 0 ? (
-                   <div className="w-full max-w-4xl flex flex-col gap-4">
-                      <div className="relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl aspect-video flex items-center justify-center">
-                         <img src={shots[currentShotIndex]?.url} alt="Shot" className="max-w-full max-h-full" />
-                         <button onClick={() => setCurrentShotIndex(p => Math.max(0, p - 1))} className="absolute left-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full"><ArrowLeft /></button>
-                         <button onClick={() => setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1))} className="absolute right-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full"><ArrowRight /></button>
+             <div className="h-full flex flex-col gap-4">
+                <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+                    {shots.length > 0 ? (
+                       <div className="w-full max-w-4xl flex flex-col gap-4" style={{ height: '100%' }}>
+                          <div className="relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl aspect-video flex items-center justify-center">
+                             <img src={shots[currentShotIndex]?.url} alt="Shot" className="max-w-full max-h-full" style={{ height: '100%' }} />
+                             <button onClick={() => setCurrentShotIndex(p => Math.max(0, p - 1))} disabled={currentShotIndex === 0} className="absolute left-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full disabled:opacity-50"><ArrowLeft /></button>
+                             <button onClick={() => setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1))} disabled={currentShotIndex === shots.length - 1} className="absolute right-4 top-1/2 -translate-y-1/2 btn-icon bg-black/50 hover:bg-black text-white rounded-full disabled:opacity-50"><ArrowRight /></button>
+                          </div>
+                       </div>
+                    ) : (
+                       <div className="text-muted flex flex-col items-center gap-4">
+                          <Camera size={48} className="opacity-20" />
+                          <p>No screenshots captured</p>
+                       </div>
+                    )}
+                  </div>
+                </div>
+                {shots.length > 0 && (
+                   <div className="flex justify-between items-center bg-surface p-4 rounded-xl border border-white/10">
+                      <div>
+                         <div className="text-sm font-mono text-muted">{shots[currentShotIndex]?.name}</div>
+                         <div className="text-xs text-muted">Owner: <span className="text-white">{shots[currentShotIndex]?.ownerName || 'Unknown'}</span> <span className="font-mono text-muted">({shots[currentShotIndex]?.ownerNumber || 'Unknown'})</span></div>
                       </div>
-                      <div className="flex justify-between items-center bg-surface p-4 rounded-xl border border-white/10">
-                         <div>
-                           <div className="text-sm font-mono text-muted">{shots[currentShotIndex]?.name}</div>
-                           <div className="text-xs text-muted">Owner: <span className="text-white">{shots[currentShotIndex]?.ownerName || 'Unknown'}</span> <span className="font-mono text-muted">({shots[currentShotIndex]?.ownerNumber || 'Unknown'})</span></div>
-                         </div>
-                         <div className="flex gap-4 items-center">
-                            <span className="text-sm text-muted">{currentShotIndex + 1} / {shots.length}</span>
-                            <button onClick={handleDeleteShot} className="btn btn-danger h-8 text-xs px-3">Delete</button>
-                         </div>
+                      <div className="flex gap-4 items-center">
+                         <span className="text-sm text-muted">{currentShotIndex + 1} / {shots.length}</span>
+                         <button onClick={handleDeleteShot} className="btn btn-danger h-8 text-xs px-3">Delete</button>
                       </div>
                    </div>
-                ) : <div className="text-muted flex flex-col items-center gap-4"><Camera size={48} className="opacity-20" /><p>No screenshots captured</p></div>}
+                )}
              </div>
           )}
         </div>
@@ -840,6 +910,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </div>
       )}
 
+      {/* CONFIRM MODAL */}
+      {showConfirmModal && (
+        <div className="modal-overlay animate-fade-in" style={{ zIndex: 130000 }}>
+          <div className="modal-content modal-sm p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-white">Confirm Action</h3>
+              <button onClick={() => setShowConfirmModal(false)} className="btn-icon"><X size={20} /></button>
+            </div>
+            <p className="text-muted mb-8">{confirmMessage}</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowConfirmModal(false)} className="btn btn-ghost">Cancel</button>
+              <button onClick={() => { onConfirmAction(); setShowConfirmModal(false); }} className="btn btn-danger">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FOLDER MODAL */}
+      {showFolderModal && (
+        <div className="modal-overlay animate-fade-in">
+          <div className="modal-content modal-md p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-white">Create New Folder</h3>
+              <button onClick={() => setShowFolderModal(false)} className="btn-icon"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="Folder name" className="login-input w-full" />
+            </div>
+            <div className="flex justify-end gap-3 mt-8">
+              <button onClick={() => setShowFolderModal(false)} className="btn btn-ghost">Cancel</button>
+              <button onClick={() => { if (folderName) { handleCreateFolder(folderName); } }} className="btn btn-primary">Create</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HIDDEN UPLOAD INPUT */}
+      <input ref={uploadInputRef} type="file" accept=".pdf" onChange={handleFileChange} style={{ display: 'none' }} />
+
       {/* MODALS */}
       {showAddModal && (
         <div className="modal-overlay">
@@ -903,7 +1012,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </button>
                  </div>
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center">
+                 <button onClick={handleClearAllScreened} className="btn btn-danger">Clear All Screened</button>
                  <button onClick={async () => {
                      try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); }
                      catch (e) { console.warn('Failed to save settings', e); }

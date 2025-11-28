@@ -8,10 +8,10 @@ import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock
 import { PDFViewer } from './PDFViewer';
 
 interface PDFFile { name: string; url: string; date: string; size: string; path: string; }
-interface DashboardPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
+interface MainPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
 const ALLOWED_ADMIN_UIDS = ["SveIem0WRcSCKl1IK44dZ1KfalO2", "s5rGItmRedXGhgjKr0hUW256Xor1"];
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNavigateAdmin, isAdmin }) => {
+export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, isAdmin }) => {
   const [weeks, setWeeks] = useState<string[]>([]);
   const [activeWeek, setActiveWeek] = useState<string | null>(null);
   const [pdfs, setPdfs] = useState<PDFFile[]>([]);
@@ -243,14 +243,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
     <div className="flex flex-row h-screen w-full select-none overflow-hidden bg-app-base">
       <aside className={`sidebar z-20 shadow-lg ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header justify-between">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg flex items-center justify-center text-white bg-surface border border-white/10" style={{ width: '36px', height: '36px' }}> <LayoutGrid size={18} /> </div>
-            <div> <h1 className="font-bold text-white tracking-tight text-base">The State</h1> </div>
-          </div>
-          <button onClick={onLogout} className="btn-icon">
-            <LogOut size={16} />
-          </button>
-        </div>
+           <div className="flex items-center gap-3">
+             <div className="rounded-lg flex items-center justify-center text-white bg-surface border border-white/10" style={{ width: '36px', height: '36px' }}> <LayoutGrid size={18} /> </div>
+             <div> <h1 className="font-bold text-white tracking-tight text-base">The State</h1> </div>
+           </div>
+         </div>
         <div className="flex-1 overflow-auto px-4 py-14 custom-scrollbar">
           {loadingWeeks ? ( <div className="flex justify-center py-8"><Loader2 className="animate-spin text-muted" size={24} /></div> ) : (
             <div className="flex flex-col gap-2">
@@ -268,14 +265,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
                   </div>
                 </div>
             )}
-            {!isMobile && (userStats.quiziTimes !== undefined || userStats.screened !== undefined) && (
-                <div className="grid grid-cols-2 gap-2 mb-3 text-center">
-                    <div className="bg-surface/50 border border-white/5 rounded-lg px-2 py-1.5"> <p className="text-xs text-muted">Quiz Tries</p> <p className="text-sm font-bold text-white" title="Quizi-Times">{userStats.quiziTimes ?? 0}</p> </div>
-                    <div className="bg-surface/50 border border-white/5 rounded-lg px-2 py-1.5"> <p className="text-xs text-muted">Screened</p> <p className="text-sm font-bold text-white" title="Screened">{userStats.screened ?? 0}</p> </div>
-                </div>
-            )}
             {(isAdmin || isMobile) && ( <button onClick={() => setShowAdminLogin(true)} className={`nav-btn mb-1 ${!isAdmin && 'hidden'}`}> <ShieldCheck size={16} /> Admin </button> )}
-            {isMobile && <button onClick={onLogout} className="nav-btn mb-1"> <LogOut size={16} /> Logout </button>}
+            <button onClick={onLogout} className="nav-btn mb-1"> <LogOut size={16} /> Logout </button>
         </div>
       </aside>
       {sidebarOpen && <div className="mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
@@ -285,7 +276,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onLogout, onNaviga
                 <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
                 <div>
                     <h2 className="text-2xl font-bold text-white">{activeWeek || 'Loading...'}</h2>
-                    <p className="text-sm text-muted">Document Repository</p>
+                    <p className="text-sm text-muted">Main page</p>
                 </div>
             </div>
         </header>
