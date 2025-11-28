@@ -268,47 +268,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const handleCreateUser = async () => {
     if (!newNumber || newNumber.length !== 11) return alert("Invalid Number");
     try {
-        await setDoc(doc(db, "Numbers", newNumber), {
-            "Name": "Unknown",
-            "PDF-Down": newPdfDown,
-            "Quiz-Enabled": true,
-            "Quizi-Times": 0,
-            "Devices": {"Devices Allowed": 1},
-            "Screened": 0
-        });
+        const createUserFunc = httpsCallable(functions, 'createUser');
+        await createUserFunc({ number: newNumber, name: "Unknown", pdfDown: newPdfDown });
         setShowAddModal(false); setNewNumber(''); setNewPdfDown(false);
-    } catch (e) { console.error(e); }
+    } catch (e: any) {
+        if (e.code === 'functions/resource-exhausted') {
+            alert("Firebase limits exceeded. Cannot create user.");
+        } else {
+            console.error(e);
+        }
+    }
   };
 
-  const handleDeleteNumber = async (id: string) => { showConfirm("Delete?", async () => { try { await deleteDoc(doc(db, "Numbers", id.trim())); } catch {} finally { setActiveDropdown(null); } }); };
+  const handleDeleteNumber = async (id: string) => {
+    showConfirm("Delete?", async () => {
+      try {
+        const deleteUserFunc = httpsCallable(functions, 'deleteUser');
+        await deleteUserFunc({ number: id.trim() });
+        setActiveDropdown(null);
+      } catch (e: any) {
+        if (e.code === 'functions/resource-exhausted') {
+          alert("Firebase limits exceeded. Cannot delete user.");
+        } else {
+          console.error(e);
+        }
+      }
+    });
+  };
   
   const handleBlockNumber = async (item: NumberData) => {
     showConfirm(`Block ${item.name || item.number}?`, async () => {
-      const now = new Date();
       try {
-        await setDoc(doc(db, "Blocked", item.number), {
-           "Blocked Date": now.toLocaleDateString("en-GB"),
-           "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-           "Reason": "Blocked by Admin",
-           "Name": item.name
-        });
+        const blockUserFunc = httpsCallable(functions, 'blockUser');
+        await blockUserFunc({ number: item.number, name: item.name, reason: "Blocked by Admin" });
         setActiveDropdown(null);
-      } catch (e) { console.error(e); }
+      } catch (e: any) {
+        if (e.code === 'functions/resource-exhausted') {
+          alert("Firebase limits exceeded. Cannot block user.");
+        } else {
+          console.error(e);
+        }
+      }
     });
   };
 
   const handleToggleQuiz = async (item: NumberData) => {
       try {
-        await updateDoc(doc(db, "Numbers", item.number), { "Quiz-Enabled": !item.quizEnabled });
+        const updateQuizFunc = httpsCallable(functions, 'updateUserQuiz');
+        await updateQuizFunc({ number: item.number, enabled: !item.quizEnabled });
         setActiveDropdown(null);
-      } catch (e) { console.error(e); }
+      } catch (e: any) {
+        if (e.code === 'functions/resource-exhausted') {
+          alert("Firebase limits exceeded. Cannot update user.");
+        } else {
+          console.error(e);
+        }
+      }
   };
 
   const handleTogglePdf = async (item: NumberData) => {
       try {
-        await updateDoc(doc(db, "Numbers", item.number), { "PDF-Down": !item.pdfDown });
+        const updatePdfFunc = httpsCallable(functions, 'updateUserPdf');
+        await updatePdfFunc({ number: item.number, enabled: !item.pdfDown });
         setActiveDropdown(null);
-      } catch (e) { console.error(e); }
+      } catch (e: any) {
+        if (e.code === 'functions/resource-exhausted') {
+          alert("Firebase limits exceeded. Cannot update user.");
+        } else {
+          console.error(e);
+        }
+      }
   };
 
   const handleClearScreen = async (item: NumberData) => {
@@ -566,17 +595,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-6">
             <ShieldAlert size={32} className="text-error" />
           </div>
-          <h2 className="text-2xl font-bold text-error mb-4">Firebase Limits Exceeded</h2>
-          <p className="text-muted mb-6">
-            You have exceeded your Firebase free tier limits. To continue using the application, please upgrade your Firebase plan.
-          </p>
-          <div className="space-y-3">
-            <p className="text-sm text-muted">Limits checked:</p>
-            <ul className="text-sm text-muted text-left space-y-1">
-              <li>• Firestore: 1.5M reads, 600K writes, 600K deletes per month</li>
-              <li>• Storage: 5GB storage, 1GB bandwidth, 50K requests per month</li>
-            </ul>
-          </div>
+          <h2 className="text-2xl font-bold text-error mb-4">Limits Exceeded</h2>
           <button onClick={() => window.location.reload()} className="btn btn-primary mt-6 w-full">
             Refresh Page
           </button>
