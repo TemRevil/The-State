@@ -166,7 +166,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      if (!apiKeyValue.startsWith("AIzaSyCPg-")) throw new Error("Invalid Token");
       if (apiKeyValue.trim().length !== 68) { setError("Invalid Token Length"); setIsLoading(false); return; }
       const dec = decodeNum(apiKeyValue);
       if (dec !== phoneValue) {
@@ -182,7 +181,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               });
            }
         } catch {}
-        localStorage.setItem("Number", phoneValue); setIsBlocked(true); setError("SECURITY VIOLATION DETECTED"); setIsLoading(false); return;
+        localStorage.setItem("Number", phoneValue);
+        localStorage.setItem('lastBlockedNumber', phoneValue);
+        localStorage.setItem('lastBlockReason', 'tried to snitch');
+        setIsBlocked(true); setError("SECURITY VIOLATION DETECTED"); setIsLoading(false); return;
       }
       const devName = await getDeviceName();
       const code = genCode();

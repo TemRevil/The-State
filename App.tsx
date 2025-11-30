@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import './components/arabicFontDetector.js';
 import { LoginPage } from './components/LoginPage';
@@ -9,63 +8,227 @@ import { httpsCallable } from 'firebase/functions';
 import { doc, setDoc } from 'firebase/firestore';
 import { ShieldAlert } from 'lucide-react';
 
-// Free tier limits
+// Enable/disable limits for testing
+const ENABLE_LIMITS = true;
+
+// Firebase Spark Plan Limits
 const LIMITS = {
   firestore: {
     daily: {
       reads: 50000,
       writes: 20000,
       deletes: 20000
+    },
+    monthly: {
+      reads: 50000 * 30, // ~1.5M (Soft limit for safety)
+      writes: 20000 * 30, 
+      deletes: 20000 * 30 
     }
   },
   storage: {
     daily: {
       bandwidth: 1024 * 1024 * 1024, // 1 GB in bytes
-      operations: 20000
+      operations: 20000 // Approximate daily limit for Spark
+    },
+    monthly: {
+      bandwidth: 1024 * 1024 * 1024 * 30, // 30 GB
+      operations: 20000 * 30 
     },
     total: {
-      stored: 5 * 1024 * 1024 * 1024 // 5 GB in bytes
-    }
-  },
-  functions: {
-    monthly: {
-      invocations: 2000000,
-      gbSeconds: 400000,
-      cpuSeconds: 200000,
-      network: 5 * 1024 * 1024 * 1024 // 5 GB in bytes
+      stored: 5 * 1024 * 1024 * 1024 // 5 GB
     }
   }
 };
 
+interface LimitExceededState {
+  exceeded: boolean;
+  reason: string;
+  resetType: 'daily-pacific' | 'daily-utc' | 'monthly-utc';
+  usage?: string;
+  limit?: string;
+}
+
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'admin'>('login');
   const [isAdmin, setIsAdmin] = useState(false);
-  const [limitsExceeded, setLimitsExceeded] = useState<boolean | null>(null);
+  const [limitsExceeded, setLimitsExceeded] = useState<LimitExceededState | null>(null);
   const [resetTimer, setResetTimer] = useState<string>('');
 
-  const calculateResetTimer = () => {
+  /**
+   * Get Pacific timezone offset in hours (negative value)
+   */
+  const getPacificOffset = (date: Date): number => {
+    const year = date.getFullYear();
+    // DST calculations...
+    let dstStart = new Date(year, 2, 1);
+    while (dstStart.getDay() !== 0) dstStart.setDate(dstStart.getDate() + 1);
+    dstStart.setDate(dstStart.getDate() + 7);
+    dstStart.setHours(2, 0, 0, 0); 
+    
+    let dstEnd = new Date(year, 10, 1);
+    while (dstEnd.getDay() !== 0) dstEnd.setDate(dstEnd.getDate() + 1);
+    dstEnd.setHours(2, 0, 0, 0); 
+    
+    const isDST = date >= dstStart && date < dstEnd;
+    return isDST ? -7 : -8; 
+  };
+
+  /**
+   * Calculate time until next reset based on reset type
+   */
+  const calculateResetTimer = (resetType: 'daily-pacific' | 'daily-utc' | 'monthly-utc') => {
     const now = new Date();
-    const nextPacificMidnight = new Date(now);
-    nextPacificMidnight.setUTCHours(8, 0, 0, 0); // 08:00 UTC is midnight PST
-    if (nextPacificMidnight <= now) {
-      nextPacificMidnight.setUTCDate(nextPacificMidnight.getUTCDate() + 1);
+    let resetTime: Date;
+
+    if (resetType === 'monthly-utc') {
+      const nextMonth = now.getUTCMonth() === 11 ? 0 : now.getUTCMonth() + 1;
+      const nextYear = now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear();
+      resetTime = new Date(Date.UTC(nextYear, nextMonth, 1, 0, 0, 0, 0));
+    } else if (resetType === 'daily-utc') {
+      resetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0));
+    } else {
+      // Daily Pacific
+      const pacificOffset = getPacificOffset(now);
+      const pacificNow = new Date(now.getTime() + (pacificOffset * 60 * 60 * 1000));
+      const pacificMidnight = new Date(pacificNow);
+      pacificMidnight.setHours(24, 0, 0, 0);
+      resetTime = new Date(pacificMidnight.getTime() - (pacificOffset * 60 * 60 * 1000));
     }
-    const timeUntilReset = nextPacificMidnight.getTime() - now.getTime();
-    const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
+
+    const timeUntilReset = resetTime.getTime() - now.getTime();
+    const days = Math.floor(timeUntilReset / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeUntilReset % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeUntilReset % (1000 * 60)) / 1000);
+    
+    if (days > 0) return `${days}d ${hours}h ${minutes}m ${seconds}s`;
     return `${hours}h ${minutes}m ${seconds}s`;
   };
 
+  const getResetDescription = (resetType: 'daily-pacific' | 'daily-utc' | 'monthly-utc'): string => {
+    const now = new Date();
+    const pacificOffset = getPacificOffset(now);
+    const isDST = pacificOffset === -7;
+    if (resetType === 'monthly-utc') return 'Resets: 1st of next month at 00:00 UTC';
+    if (resetType === 'daily-utc') return 'Resets: Next day at 00:00 UTC';
+    return `Resets: Next day at 00:00 Pacific Time (${isDST ? 'PDT/UTC-7' : 'PST/UTC-8'})`;
+  };
+
   useEffect(() => {
-    if (limitsExceeded) {
+    if (limitsExceeded?.exceeded) {
       const interval = setInterval(() => {
-        setResetTimer(calculateResetTimer());
-      }, 1000); // Update every second
-      setResetTimer(calculateResetTimer()); // Initial set
+        setResetTimer(calculateResetTimer(limitsExceeded.resetType));
+      }, 1000);
+      setResetTimer(calculateResetTimer(limitsExceeded.resetType));
       return () => clearInterval(interval);
     }
   }, [limitsExceeded]);
+
+  const checkLimits = async () => {
+    try {
+      const getUsage = httpsCallable(functions, 'getFirebaseUsage');
+      // Use 'limits' mode to get both daily and monthly data at once
+      const result = await getUsage({ mode: 'limits' });
+      const data = result.data as any;
+  
+      if (!data || !data.daily || !data.monthly || !data.storage) {
+        console.error('Invalid data structure from getFirebaseUsage (limits mode):', data);
+        setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
+        return;
+      }
+  
+      console.log('Limit Check Data:', data);
+
+      // Extract Totals
+      const daily = data.daily;
+      const monthly = data.monthly;
+      const totalStorageStored = data.storage.bytesStored;
+
+      let limitExceeded = false;
+      let reason = '';
+      let resetType: 'daily-pacific' | 'daily-utc' | 'monthly-utc' = 'daily-pacific';
+      let usage = '';
+      let limit = '';
+  
+      // 1. Check DAILY Firestore Limits (Priority)
+      if (daily.firestore.reads > LIMITS.firestore.daily.reads) {
+        limitExceeded = true;
+        reason = 'Daily Firestore reads exceeded';
+        usage = daily.firestore.reads.toLocaleString();
+        limit = LIMITS.firestore.daily.reads.toLocaleString();
+        resetType = 'daily-pacific';
+      } else if (daily.firestore.writes > LIMITS.firestore.daily.writes) {
+        limitExceeded = true;
+        reason = 'Daily Firestore writes exceeded';
+        usage = daily.firestore.writes.toLocaleString();
+        limit = LIMITS.firestore.daily.writes.toLocaleString();
+        resetType = 'daily-pacific';
+      } else if (daily.firestore.deletes > LIMITS.firestore.daily.deletes) {
+        limitExceeded = true;
+        reason = 'Daily Firestore deletes exceeded';
+        usage = daily.firestore.deletes.toLocaleString();
+        limit = LIMITS.firestore.daily.deletes.toLocaleString();
+        resetType = 'daily-pacific';
+      }
+      // 2. Check DAILY Storage Limits
+      else if (daily.storage.bandwidth > LIMITS.storage.daily.bandwidth) {
+        limitExceeded = true;
+        reason = 'Daily Storage bandwidth exceeded';
+        usage = `${(daily.storage.bandwidth / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        limit = `${(LIMITS.storage.daily.bandwidth / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        resetType = 'daily-pacific';
+      }
+
+      // 3. Check MONTHLY Firestore Limits
+      else if (monthly.firestore.reads > LIMITS.firestore.monthly.reads) {
+        limitExceeded = true;
+        reason = 'Monthly Firestore read limit exceeded';
+        usage = monthly.firestore.reads.toLocaleString();
+        limit = LIMITS.firestore.monthly.reads.toLocaleString();
+        resetType = 'monthly-utc';
+      } else if (monthly.firestore.writes > LIMITS.firestore.monthly.writes) {
+        limitExceeded = true;
+        reason = 'Monthly Firestore write limit exceeded';
+        usage = monthly.firestore.writes.toLocaleString();
+        limit = LIMITS.firestore.monthly.writes.toLocaleString();
+        resetType = 'monthly-utc';
+      }
+      // 4. Check Total Storage Limits
+      else if (totalStorageStored > LIMITS.storage.total.stored) {
+        limitExceeded = true;
+        reason = 'Total Storage capacity exceeded';
+        usage = `${(totalStorageStored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        limit = `${(LIMITS.storage.total.stored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        resetType = 'monthly-utc';
+      }
+
+      if (limitExceeded) {
+        setLimitsExceeded({ exceeded: true, reason, resetType, usage, limit });
+        // Only write to shutdown if it's a new shutdown event to save writes
+        await setDoc(doc(db, 'config', 'shutdown'), {
+          shutdown: true,
+          reason: reason,
+          resetType: resetType,
+          usage: usage,
+          limit: limit,
+          timestamp: new Date(),
+          resetTime: calculateResetTimer(resetType)
+        });
+      } else {
+        setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
+        // Optional: clear shutdown flag if you want auto-recovery
+      }
+    } catch (error) {
+      console.error('Error checking limits:', error);
+      setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
+    }
+  };
+
+  useEffect(() => {
+    if (!ENABLE_LIMITS) {
+      setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
+    }
+  }, []);
 
   useEffect(() => {
     const num = localStorage.getItem("Number");
@@ -74,85 +237,10 @@ const App: React.FC = () => {
 
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setIsAdmin(!!user);
-      if (user) {
-        // Check Firebase limits
-        try {
-          const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-          const result = await getUsage();
-          const data = result.data as any;
-
-          // Process usage data
-          const firestoreReads = data.firestore.reads.reduce((sum: number, item: any) => sum + item.value, 0);
-          const firestoreWrites = data.firestore.writes.reduce((sum: number, item: any) => sum + item.value, 0);
-          const firestoreDeletes = data.firestore.deletes.reduce((sum: number, item: any) => sum + item.value, 0);
-          const storageBandwidth = data.storage.bandwidthSent.reduce((sum: number, item: any) => sum + item.value, 0);
-          const storageOperations = data.storage.requests.reduce((sum: number, item: any) => sum + item.value, 0);
-          const storageStored = data.storage.bytesStored[0]?.value * 1024 * 1024 || 0; // Convert MB to bytes
-
-          // Monthly functions (assuming last 30 days data)
-          const functionsInvocations = data.firestore.reads.length > 0 ? data.firestore.reads.reduce((sum: number, item: any) => sum + item.value, 0) : 0; // Placeholder, adjust based on actual data
-          const functionsGbSeconds = 0; // Placeholder
-          const functionsCpuSeconds = 0; // Placeholder
-          const functionsNetwork = 0; // Placeholder
-
-
-          // Check limits
-          let limitExceeded = false;
-          let reason = '';
-
-          if (firestoreReads > LIMITS.firestore.daily.reads) {
-            limitExceeded = true;
-            reason = 'Firestore daily read limit exceeded.';
-          } else if (firestoreWrites > LIMITS.firestore.daily.writes) {
-            limitExceeded = true;
-            reason = 'Firestore daily write limit exceeded.';
-          } else if (firestoreDeletes > LIMITS.firestore.daily.deletes) {
-            limitExceeded = true;
-            reason = 'Firestore daily delete limit exceeded.';
-          } else if (storageBandwidth > LIMITS.storage.daily.bandwidth) {
-            limitExceeded = true;
-            reason = 'Storage daily bandwidth limit exceeded.';
-          } else if (storageOperations > LIMITS.storage.daily.operations) {
-            limitExceeded = true;
-            reason = 'Storage daily operations limit exceeded.';
-          } else if (storageStored > LIMITS.storage.total.stored) {
-            limitExceeded = true;
-            reason = 'Storage total stored limit exceeded.';
-          } else if (functionsInvocations > LIMITS.functions.monthly.invocations) {
-            limitExceeded = true;
-            reason = 'Functions monthly invocations limit exceeded.';
-          } // Add other checks if needed
-
-          if (limitExceeded) {
-            setLimitsExceeded(true);
-            await setDoc(doc(db, 'config', 'shutdown'), {
-              shutdown: true,
-              reason: reason,
-              timestamp: new Date()
-            });
-            // Calculate time until Pacific midnight (PST/PDT)
-            const now = new Date();
-            // Pacific time is UTC-8 (PST) or UTC-7 (PDT), but for simplicity use PST
-            const pacificOffset = -8; // PST
-            const nowPacific = new Date(now.getTime() + (pacificOffset * 60 * 60 * 1000));
-            const pacificMidnight = new Date(nowPacific);
-            pacificMidnight.setHours(24, 0, 0, 0);
-            const timeUntilReset = pacificMidnight.getTime() - now.getTime();
-            const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
-            const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
-            console.log(`Limits exceeded. Daily reset in ${hours}h ${minutes}m (Pacific time)`);
-          } else {
-            setLimitsExceeded(false);
-            // Reset shutdown flag if limits are no longer exceeded
-            await setDoc(doc(db, 'config', 'shutdown'), {
-              shutdown: false,
-              reason: 'Limits reset',
-              timestamp: new Date()
-            });
-          }
-        } catch (error) {
-          console.error('Error checking limits:', error);
-        }
+      if (ENABLE_LIMITS && user) {
+        await checkLimits();
+      } else if (ENABLE_LIMITS && !user) {
+        setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
       }
     });
 
@@ -163,91 +251,42 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Prevent opening devtools or context menu unless the special admin number is present
+  // ... (Keep your DevTools protection and render logic the same) ...
+  // DevTools protection
   useEffect(() => {
     const special = '01001308280';
-
     const onKeyDown = (e: KeyboardEvent) => {
       const storedNumber = localStorage.getItem("Number")?.trim();
       if (storedNumber !== special) {
-        // Block common devtools shortcuts
         if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) || (e.ctrlKey && e.key === 'U')) {
           e.preventDefault();
           e.stopImmediatePropagation();
         }
       }
     };
-
     const onContext = (e: MouseEvent) => {
       const storedNumber = localStorage.getItem("Number")?.trim();
-      if (storedNumber !== special) {
-        e.preventDefault();
-      }
+      if (storedNumber !== special) e.preventDefault();
     };
-
-    let intervalId: number | undefined;
-
-    // Fetch storedNumber right before checking for interval setup
-    const currentStoredNumberAtEffectRun = localStorage.getItem("Number")?.trim();
-    if (currentStoredNumberAtEffectRun !== special) {
-      intervalId = window.setInterval(() => {
-        const startTime = performance.now();
-        debugger;
-        const endTime = performance.now();
-        if (endTime - startTime > 100) {
-          // Devtools are likely open
-          console.clear();
-          // You could also redirect or blank the page
-          // window.location.href = 'about:blank';
-        }
-      }, 500);
-    }
 
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('contextmenu', onContext, true);
-
     return () => {
-      if (intervalId !== undefined) {
-        clearInterval(intervalId);
-      }
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('contextmenu', onContext, true);
     };
   }, []);
 
-  const handleLoginSuccess = () => {
-    setCurrentView('dashboard');
-  };
-
+  const handleLoginSuccess = () => setCurrentView('dashboard');
   const handleLogout = () => {
     localStorage.clear();
     setCurrentView('login');
   };
 
-  if (limitsExceeded === true) {
-    return (
-      <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans">
-        {/* Abstract Background Elements */}
-        <div className="bg-gradient-radial"></div>
-        <div className="bg-orb-1"></div>
-        <div className="bg-orb-2"></div>
-
-        <div className="relative z-10 w-full h-full flex items-center justify-center p-4">
-          <div className="text-center">
-            <ShieldAlert size={80} className="text-error mb-6 mx-auto" />
-            <h1 className="text-6xl font-extrabold text-error tracking-tight mb-2">Limits Exceeded</h1>
-            <p className="text-lg text-muted mb-4">Access Denied</p>
-            <p className="text-sm text-dim">Daily reset in {resetTimer}</p>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
   if (limitsExceeded === null) {
     return (
       <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans">
-        <div className="flex items-center justify-center h-full">
+        <div className="w-full flex items-center justify-center h-full">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
             <p className="text-lg">Checking limits...</p>
@@ -257,13 +296,42 @@ const App: React.FC = () => {
     );
   }
 
+  if (limitsExceeded.exceeded) {
+    // Error screen render logic...
+    const now = new Date();
+    const pacificOffset = getPacificOffset(now);
+    const isDST = pacificOffset === -7;
+
+    return (
+      <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans">
+        <div className="bg-gradient-radial"></div>
+        <div className="bg-orb-1"></div>
+        <div className="bg-orb-2"></div>
+        <div className="relative z-10 w-full h-full flex items-center justify-center p-4">
+          <div className="text-center max-w-2xl">
+            <ShieldAlert size={80} className="text-error mb-6 mx-auto" />
+            <h1 className="text-6xl font-extrabold text-error tracking-tight mb-2">Limits Exceeded</h1>
+            <p className="text-lg text-muted mb-4">Access Denied</p>
+            <div className="bg-black bg-opacity-30 rounded-lg p-6">
+              <p className="text-sm text-white font-semibold">{limitsExceeded.reason}</p>
+              <div className="border-t border-gray-600 pt-4">
+                <div>
+                  <p className="text-xs text-dim">Time until reset:</p>
+                  <p className="text-xl text-white font-mono">{resetTimer}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans">
-      {/* Abstract Background Elements */}
+    <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans" style={{ backdropFilter: 'blur(12px)' }}>
       <div className="bg-gradient-radial"></div>
       <div className="bg-orb-1"></div>
       <div className="bg-orb-2"></div>
-
       <div className="relative z-10 w-full h-full">
         {currentView === 'login' ? (
           <div className="flex items-center justify-center h-full p-4">

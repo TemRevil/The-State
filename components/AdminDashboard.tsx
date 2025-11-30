@@ -5,7 +5,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnaps
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -16,21 +16,42 @@ interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; ur
 
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
 
+interface LoginAttempt {
+  attemptId: string;
+  deviceId: string;
+  Code: string;
+  Date: string;
+  Time: string;
+}
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
-  const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
+    // Firebase free tier limits
+    const FIREBASE_LIMITS = {
+      firestore: { daily: { reads: 50000, writes: 20000, deletes: 20000 } },
+      storage: { daily: { bandwidth: 1024, operations: 20000 }, total: { stored: 5 * 1024 * 1024 * 1024 } }
+    };
+
+    // Monthly quotas
+    const MONTHLY_LIMITS = {
+      firestore: { reads: 1000000, writes: 500000, deletes: 200000 },
+      storage: { bandwidth: 30 * 1024, operations: 600000 }
+    };
+
+   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
    const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
    const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [numbers, setNumbers] = useState<NumberData[]>([]);  const [blocked, setBlocked] = useState<BlockedData[]>([]);
-     const [snitches, setSnitches] = useState<SnitchData[]>([]);
-     const [showInfoModal, setShowInfoModal] = useState(false); // Unified modal visibility
-     const [activeInfo, setActiveInfo] = useState<ActiveInfo | null>(null); // Holds the data for the active info display
-     const [loginAttemptsData, setLoginAttemptsData] = useState<LoginAttempt[]>([]); // New state for login attempts
+   const [numbers, setNumbers] = useState<NumberData[]>([]);  
+   const [blocked, setBlocked] = useState<BlockedData[]>([]);
+   const [snitches, setSnitches] = useState<SnitchData[]>([]);
+   const [showInfoModal, setShowInfoModal] = useState(false); 
+   const [activeInfo, setActiveInfo] = useState<ActiveInfo | null>(null); 
+   const [loginAttemptsData, setLoginAttemptsData] = useState<LoginAttempt[]>([]);
 
   const [brokers, setBrokers] = useState<BrokerData[]>([]);
   const [adminName, setAdminName] = useState('Admin');
   const [blockedNumbers, setBlockedNumbers] = useState<Set<string>>(new Set());
-  
+
   // Files State
   const [files, setFiles] = useState<FileData[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -38,15 +59,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [fileViewMode, setFileViewMode] = useState<'grid' | 'table'>('grid');
 
+  // Shots State
   const [shots, setShots] = useState<any[]>([]);
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
-  const [firebaseUsage, setFirebaseUsage] = useState<{ firestore: any; storage: any } | null>(null);
+
+  // --- FIREBASE USAGE STATE (UPDATED) ---
+  const [firebaseUsage, setFirebaseUsage] = useState<any | null>(null);
+  const [usageViewMode, setUsageViewMode] = useState<'24h' | '7d' | '30d' | 'billing' | 'quota'>('24h');
+  const [showUsageDropdown, setShowUsageDropdown] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
+
+  // Modals & UI State
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderName, setFolderName] = useState('');
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [showPdfDropdown, setShowPdfDropdown] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
   const [onConfirmAction, setOnConfirmAction] = useState<() => void>(() => {});
@@ -56,36 +86,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const tableNavRef = useRef<HTMLDivElement>(null);
   const fileNavRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
+  const [deviceType, setDeviceType] = useState<'phone' | 'tablet' | 'desktop'>(
+    window.innerWidth < 600 ? 'phone' : window.innerWidth < 900 ? 'tablet' : 'desktop'
+  );
+  const [visibleCount, setVisibleCount] = useState(15);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [visibleAttempts, setVisibleAttempts] = useState(10);
+  const modalScrollRef = useRef<HTMLDivElement>(null);
   
-  // Add User Inputs
+  // User Inputs
   const [newNumber, setNewNumber] = useState('');
-  const [newPdfDown, setNewPdfDown] = useState(false); // Default Blocked
+  const [newPdfDown, setNewPdfDown] = useState(false); 
   
   const [searchTerm, setSearchTerm] = useState('');
   const [globalQuiz, setGlobalQuiz] = useState(true);
   const [globalPdf, setGlobalPdf] = useState(true);
 
-  // Define an interface for a single login attempt to make the code more readable and type-safe
-  interface LoginAttempt {
-    attemptId: string;
-    deviceId: string;
-    Code: string;
-    Date: string;
-    Time: string;
-  }
+  // Custom tooltip for charts
+  const CustomTooltip = ({ active, payload, label, limit }: any) => {
+    if (active && payload && payload.length && label) {
+      return (
+        <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <p style={{ margin: 0, color: '#fff', fontSize: '0.875rem' }}>
+            {new Date(label as number).toLocaleString('en-GB', {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            })}
+          </p>
+          <p style={{ margin: '4px 0 0 0', color: payload[0].color, fontSize: '0.875rem', fontWeight: '500' }}>
+            {payload[0].name}: {Number(payload[0].value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
 
-  // Click Outside Handler for Dropdowns
+  // ------------------------------------------------------------------
+  //  UPDATED: Custom Axis Tick for Double Time (UTC & Cairo)
+  // ------------------------------------------------------------------
+  const CustomAxisTick = ({ x, y, payload }: any) => {
+    if (!payload || payload.value == null) return null;
+    const date = new Date(payload.value as number);
+
+    // Only apply dual time display in 24h/Quota view where hourly precision matters
+    if (usageViewMode === '24h' || usageViewMode === 'quota') {
+      const utcTime = date.toLocaleTimeString('en-GB', { 
+        timeZone: 'UTC', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+
+      const cairoTime = date.toLocaleTimeString('en-GB', { 
+        timeZone: 'Africa/Cairo', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={16} textAnchor="middle" fill="#ccc" fontSize={12} fontWeight={500}>{utcTime}</text>
+          <text x={0} y={0} dy={32} textAnchor="middle" fill="#ccc" fontSize={11} opacity={0.4}>{cairoTime}</text>
+        </g>
+      );
+    }
+
+    // Default Date View (7d, 30d, etc.)
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text x={0} y={0} dy={16} textAnchor="middle" fill="#ccc" fontSize={12}>
+          {date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+        </text>
+      </g>
+    );
+  };
+
+  // Click Outside Handler
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!target.closest('.options-menu') && !target.closest('.btn-icon')) {
+      if (!target.closest('.options-menu') && !target.closest('.btn-icon') && !target.closest('.btn-secondary')) {
         setActiveDropdown(null);
+        setShowUsageDropdown(false);
       }
       if (tableNavRef.current && !tableNavRef.current.contains(event.target as Node)) {
         setShowTableNavMenu(false);
-      }
-      if (fileNavRef.current && !fileNavRef.current.contains(event.target as Node)) {
-        setShowFileNavMenu(false);
       }
     };
     document.addEventListener('click', handleClickOutside);
@@ -94,57 +178,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   // --- DATA WATCHERS ---
    useEffect(() => {
-    // Admin Name & Settings
     getDoc(doc(db, "Dashboard", "Admin")).then(s => s.exists() && setAdminName(s.data().Name || 'Admin'));
     getDoc(doc(db, "Dashboard", "Settings")).then(s => s.exists() && (setGlobalQuiz(s.data()["Quiz-Enabled"]), setGlobalPdf(s.data()["PDF-Down"])));
     
-    // Watch Collections
     const u1 = onSnapshot(collection(db, "Blocked"), s => {
-        const blockedData = s.docs.map(d => ({ 
-            id: d.id, 
-            number: d.id, 
-            name: d.data().Name || 'Unknown', 
-            reason: d.data().Reason || 'Unknown', 
-            date: d.data()["Blocked Date"] || '', 
-            time: d.data()["Blocked Time"] || ''
-        }));
+        const blockedData = s.docs.map(d => ({ id: d.id, number: d.id, name: d.data().Name || 'Unknown', reason: d.data().Reason || 'Unknown', date: d.data()["Blocked Date"] || '', time: d.data()["Blocked Time"] || '' }));
         setBlocked(blockedData);
         setBlockedNumbers(new Set(blockedData.map(b => b.number)));
     });
     
     const u2 = onSnapshot(collection(db, "Numbers"), s => {
-        setNumbers(s.docs.map(d => ({ 
-            id: d.id, 
-            number: d.id, 
-            name: d.data().Name, 
-            quizTimes: d.data()["Quizi-Times"]||0, 
-            quizEnabled: d.data()["Quiz-Enabled"]??true, 
-            pdfDown: d.data()["PDF-Down"]??true, 
-            deviceCount: 0, 
-                        screenedCount: d.data()["Screened"]||0,
-                        devices: d.data().Devices // This will be the top-level 'Devices' map
-                    })));    });
+        setNumbers(s.docs.map(d => ({ id: d.id, number: d.id, name: d.data().Name, quizTimes: d.data()["Quizi-Times"]||0, quizEnabled: d.data()["Quiz-Enabled"]??true, pdfDown: d.data()["PDF-Down"]??true, deviceCount: 0, screenedCount: d.data()["Screened"]||0, devices: d.data().Devices })));    
+    });
     
       const u3 = onSnapshot(collection(db, "Snitches"), async s => {
            const snitchesData = await Promise.all(s.docs.map(async d => {
                const snitchNum = d.data()["The Snitch"];
-               let fetchedSnitchName = "Unknown"; // Default name
+               let fetchedSnitchName = "Unknown"; 
                if (snitchNum) {
-                   const numberDocRef = doc(db, "Numbers", snitchNum);
-                   const numberDocSnap = await getDoc(numberDocRef);
-                   if (numberDocSnap.exists()) {
-                       fetchedSnitchName = numberDocSnap.data().Name || "Unknown";
-                   }
+                   try { const d = await getDoc(doc(db, "Numbers", snitchNum)); if(d.exists()) fetchedSnitchName = d.data().Name || "Unknown"; } catch {}
                }
-   
-               return {
-                   id: d.id,
-                   loginNumber: d.data()["The Login Number"],
-                   snitchNumber: snitchNum,
-                   snitchName: fetchedSnitchName,
-                   date: d.data()["Snitched Date"],
-                   time: d.data()["Snitched Time"]
-               };
+               return { id: d.id, loginNumber: d.data()["The Login Number"], snitchNumber: snitchNum, snitchName: fetchedSnitchName, date: d.data()["Snitched Date"], time: d.data()["Snitched Time"] };
            }));
            setSnitches(snitchesData);
        });
@@ -154,357 +208,150 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
        const data = d.data();
        const attemptsArray = Object.values(data.Attempts || {}) as { Date: string; Time: string; Password?: string; }[];
        const lastAttempt = attemptsArray.length > 0 ? attemptsArray[attemptsArray.length - 1] : { Date: '', Time: '' };
-       return {
-         id: d.id,
-         number: d.id,
-         count: attemptsArray.length,
-         date: lastAttempt.Date,
-         time: lastAttempt.Time,
-         attempts: attemptsArray,
-       };
+       return { id: d.id, number: d.id, count: attemptsArray.length, date: lastAttempt.Date, time: lastAttempt.Time, attempts: attemptsArray };
      }));
    });
-
-      return () => { u1(); u2(); u3(); u4(); };
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
-  // Effect for window resize
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 900);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const handleResize = () => { setIsMobile(window.innerWidth < 900); setDeviceType(window.innerWidth < 600 ? 'phone' : window.innerWidth < 900 ? 'tablet' : 'desktop'); };
+    window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useEffect(() => { setVisibleCount(15); }, [searchTerm, activeTableTab]);
 
-  // Effect to fetch login attempts when the modal is shown
+  useEffect(() => {
+    const container = tableContainerRef.current;
+    if (!container || activeTableTab !== 'numbers') return;
+    const handleScroll = () => {
+      const total = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase())).length;
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) setVisibleCount(prev => Math.min(prev + 15, total));
+    };
+    container.addEventListener('scroll', handleScroll); return () => container.removeEventListener('scroll', handleScroll);
+  }, [activeTableTab, visibleCount, numbers, searchTerm]);
+
+
   useEffect(() => {
     if (showInfoModal && activeInfo?.type === 'number') {
       const fetchLoginAttempts = async () => {
         const attempts: LoginAttempt[] = [];
-        const numberDocRef = doc(db, 'Numbers', activeInfo.data.number);
-        const numberDocSnap = await getDoc(numberDocRef);
-
+        const numberDocSnap = await getDoc(doc(db, 'Numbers', activeInfo.data.number));
         if (numberDocSnap.exists()) {
           const data = numberDocSnap.data();
-          
-          if (data && typeof data === 'object' && data.Devices && typeof data.Devices === 'object' && data.Devices.Archived && typeof data.Devices.Archived === 'object') {
+          if (data && data.Devices && data.Devices.Archived) {
             Object.keys(data.Devices.Archived).forEach(attemptId => {
               const attemptData = data.Devices.Archived![attemptId];
-              if (attemptData && typeof attemptData === 'object') {
-                attempts.push({
-                  attemptId: attemptId,
-                  deviceId: attemptId, // Use attemptId as deviceId for display
-                  Code: attemptData.Code || 'N/A',
-                  Date: attemptData.Date || 'N/A',
-                  Time: attemptData.Time || 'N/A',
-                });
-              }
+              if (attemptData) attempts.push({ attemptId: attemptId, deviceId: attemptId, Code: attemptData.Code || 'N/A', Date: attemptData.Date || 'N/A', Time: attemptData.Time || 'N/A' });
             });
           }
         }
-        // Sort attempts by Device ID (attemptId) numerically in ascending order
-        setLoginAttemptsData(attempts.sort((a, b) => parseInt(a.attemptId || '0') - parseInt(b.attemptId || '0')));
+        setLoginAttemptsData(attempts.sort((a, b) => parseInt(b.attemptId || '0') - parseInt(a.attemptId || '0')));
+        setVisibleAttempts(10); 
       };
       fetchLoginAttempts();
-    } else {
-      setLoginAttemptsData([]);
-    }
+    } else { setLoginAttemptsData([]); setVisibleAttempts(10); }
   }, [showInfoModal, activeInfo]);
 
-  const showConfirm = (message: string, action: () => void) => {
-    setConfirmMessage(message);
-    setOnConfirmAction(() => action);
-    setShowConfirmModal(true);
-  };
+  useEffect(() => {
+    const container = modalScrollRef.current;
+    if (!container || !showInfoModal || activeInfo?.type !== 'number') return;
+    const handleScroll = () => { if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) setVisibleAttempts(prev => Math.min(prev + 10, loginAttemptsData.length)); };
+    container.addEventListener('scroll', handleScroll); return () => container.removeEventListener('scroll', handleScroll);
+  }, [showInfoModal, activeInfo, visibleAttempts, loginAttemptsData.length]);
 
+  const showConfirm = (message: string, action: () => void) => { setConfirmMessage(message); setOnConfirmAction(() => action); setShowConfirmModal(true); };
   const handleLogout = async () => { showConfirm("Logout?", async () => { await signOut(auth); window.location.reload(); }); };
-  
-  // --- NUMBER ACTIONS ---
   const handleCreateUser = async () => {
     if (!newNumber || newNumber.length !== 11) return alert("Invalid Number");
-    try {
-        const createUserFunc = httpsCallable(functions, 'createUser');
-        await createUserFunc({ number: newNumber, name: "Unknown", pdfDown: newPdfDown });
-        setShowAddModal(false); setNewNumber(''); setNewPdfDown(false);
-    } catch (e: any) {
-        console.error(e);
-    }
+    try { await setDoc(doc(db, 'Numbers', newNumber), { "Name": "Unknown", "PDF-Down": newPdfDown, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {}, "Screened": 0 }); setShowAddModal(false); setNewNumber(''); setNewPdfDown(false); } catch (e: any) { console.error(e); }
   };
+  const handleDeleteNumber = async (id: string) => { showConfirm("Delete?", async () => { try { await deleteDoc(doc(db, 'Numbers', id.trim())); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
+  const handleBlockNumber = async (item: NumberData) => { showConfirm(`Block ${item.name || item.number}?`, async () => { try { const now = new Date(); await setDoc(doc(db, 'Blocked', item.number), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": "Blocked by Admin", "Name": item.name }); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
+  const handleToggleQuiz = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "Quiz-Enabled": !item.quizEnabled }); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleTogglePdf = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "PDF-Down": !item.pdfDown }); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleClearScreen = async (item: NumberData) => { try { await updateDoc(doc(db, "Numbers", item.number), { Screened: 0 }); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleClearAllScreened = async () => { showConfirm("Clear all screened counts?", async () => { try { const numbersSnap = await getDocs(collection(db, "Numbers")); await Promise.all(numbersSnap.docs.map(doc => updateDoc(doc.ref, { Screened: 0 }))); } catch (e) { console.error(e); } }); };
+  const handleUnblock = async (item: BlockedData) => { showConfirm(`Unblock ${item.number}?`, async () => { try { await setDoc(doc(db, "Numbers", item.number), { "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {} }); await deleteDoc(doc(db, "Blocked", item.number)); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
+  const handleDeleteBlocked = async (id: string) => { showConfirm("Delete record?", async () => { await deleteDoc(doc(db, "Blocked", id)); setActiveDropdown(null); }); };
+  const handleBlockSnitch = async (item: SnitchData) => { showConfirm(`Block Snitch ${item.snitchNumber}?`, async () => { const now = new Date(); try { let name = item.snitchName; await setDoc(doc(db, "Blocked", item.snitchNumber), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": `Snitched on ${item.loginNumber}`, "Name": name || 'Unknown' }); try { await deleteDoc(doc(db, "Numbers", item.snitchNumber)); } catch {} setActiveDropdown(null); } catch (e) { console.error(e); } }); };
+  const handleDeleteSnitch = async (id: string) => { showConfirm("Delete record?", async () => { await deleteDoc(doc(db, "Snitches", id)); setActiveDropdown(null); }); };
+  const handleBlockBroker = async (item: BrokerData) => { showConfirm(`Block Broker ${item.number}?`, async () => { const now = new Date(); try { let name = "Unknown"; try { const d = await getDoc(doc(db, "Numbers", item.number)); if (d.exists()) name = d.data().Name; } catch (e) { } await setDoc(doc(db, "Blocked", item.number), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": `Blocked as Broker`, "Name": name }); await deleteDoc(doc(db, "Brokers", item.id)); try { await deleteDoc(doc(db, "Numbers", item.number)); } catch {} setActiveDropdown(null); } catch (e) { console.error(e); } }); };
 
-  const handleDeleteNumber = async (id: string) => {
-    showConfirm("Delete?", async () => {
-      try {
-        const deleteUserFunc = httpsCallable(functions, 'deleteUser');
-        await deleteUserFunc({ number: id.trim() });
-        setActiveDropdown(null);
-      } catch (e: any) {
-        console.error(e);
-      }
-    });
-  };
-  
-  const handleBlockNumber = async (item: NumberData) => {
-    showConfirm(`Block ${item.name || item.number}?`, async () => {
-      try {
-        const blockUserFunc = httpsCallable(functions, 'blockUser');
-        await blockUserFunc({ number: item.number, name: item.name, reason: "Blocked by Admin" });
-        setActiveDropdown(null);
-      } catch (e: any) {
-        console.error(e);
-      }
-    });
-  };
-
-  const handleToggleQuiz = async (item: NumberData) => {
-      try {
-        const updateQuizFunc = httpsCallable(functions, 'updateUserQuiz');
-        await updateQuizFunc({ number: item.number, enabled: !item.quizEnabled });
-        setActiveDropdown(null);
-      } catch (e: any) {
-        console.error(e);
-      }
-  };
-
-  const handleTogglePdf = async (item: NumberData) => {
-      try {
-        const updatePdfFunc = httpsCallable(functions, 'updateUserPdf');
-        await updatePdfFunc({ number: item.number, enabled: !item.pdfDown });
-        setActiveDropdown(null);
-      } catch (e: any) {
-        console.error(e);
-      }
-  };
-
-  const handleClearScreen = async (item: NumberData) => {
-      try {
-        await updateDoc(doc(db, "Numbers", item.number), { Screened: 0 });
-        setActiveDropdown(null);
-      } catch (e) { console.error(e); }
-  };
-
-  const handleClearAllScreened = async () => {
-    showConfirm("Clear all screened counts for all users?", async () => {
-      try {
-        const numbersSnap = await getDocs(collection(db, "Numbers"));
-        const updates = numbersSnap.docs.map(doc => updateDoc(doc.ref, { Screened: 0 }));
-        await Promise.all(updates);
-      } catch (e) { console.error(e); }
-    });
-  };
-
-  // --- BLOCKED ACTIONS ---
-  const handleUnblock = async (item: BlockedData) => {
-      showConfirm(`Unblock ${item.number}?`, async () => {
-        try {
-          await setDoc(doc(db, "Numbers", item.number), {
-              "Name": item.name || 'Unknown', "PDF-Down": true, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {}
-          });
-          await deleteDoc(doc(db, "Blocked", item.number));
-          setActiveDropdown(null);
-        } catch (e) { console.error(e); }
-      });
-  };
-
-  const handleDeleteBlocked = async (id: string) => {
-      showConfirm("Delete record?", async () => {
-        await deleteDoc(doc(db, "Blocked", id));
-        setActiveDropdown(null);
-      });
-  };
-
-  // --- SNITCH ACTIONS ---
-  const handleBlockSnitch = async (item: SnitchData) => {
-      showConfirm(`Block Snitch ${item.snitchNumber}?`, async () => {
-        const now = new Date();
-        try {
-          let name = item.snitchName;
-          if (!name || name === 'Unknown') {
-               try {
-                   const d = await getDoc(doc(db, "Numbers", item.snitchNumber));
-                   if(d.exists()) name = d.data().Name;
-               } catch {}
-          }
-          await setDoc(doc(db, "Blocked", item.snitchNumber), {
-              "Blocked Date": now.toLocaleDateString("en-GB"),
-              "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-              "Reason": `Snitched on ${item.loginNumber}`,
-              "Name": name || 'Unknown'
-          });
-          try { await deleteDoc(doc(db, "Numbers", item.snitchNumber)); } catch {}
-          setActiveDropdown(null);
-        } catch (e) { console.error(e); }
-      });
-  };
-
-  const handleDeleteSnitch = async (id: string) => {
-      showConfirm("Delete record?", async () => {
-        await deleteDoc(doc(db, "Snitches", id));
-        setActiveDropdown(null);
-      });
-  };
-
-  // --- BROKER ACTIONS ---
-  const handleBlockBroker = async (item: BrokerData) => {
-    showConfirm(`Block Broker ${item.number}?`, async () => {
-      const now = new Date();
-      try {
-          let name = "Unknown"; // Brokers table doesn't have name directly, need to fetch if exists in Numbers
-          try {
-              const d = await getDoc(doc(db, "Numbers", item.number));
-              if (d.exists()) name = d.data().Name || "Unknown";
-          } catch (e) { console.warn("Failed to get name for broker from Numbers", e); }
-
-          await setDoc(doc(db, "Blocked", item.number), {
-              "Blocked Date": now.toLocaleDateString("en-GB"),
-              "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }),
-              "Reason": `Blocked as Broker`,
-              "Name": name
-          });
-          // Also delete from Brokers collection
-          await deleteDoc(doc(db, "Brokers", item.id)); // Assuming item.id is the document ID in Brokers
-          try { await deleteDoc(doc(db, "Numbers", item.number)); } catch {} // Optional: remove from Numbers too
-
-          setActiveDropdown(null);
-      } catch (e) { console.error(e); }
-    });
-  };
-
-
-  // Filtering
-   const filteredNumbers = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
-   const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
-   const filteredSnitches = snitches.filter(s => s.loginNumber?.includes(searchTerm) || s.snitchNumber?.includes(searchTerm));
-   const filteredBrokers = brokers.filter(b => b.number?.includes(searchTerm));
+  const filteredNumbers = numbers.filter(n => n.number?.includes(searchTerm) || n.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
+  const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
+  const filteredSnitches = snitches.filter(s => s.loginNumber?.includes(searchTerm) || s.snitchNumber?.includes(searchTerm));
+  const filteredBrokers = brokers.filter(b => b.number?.includes(searchTerm));
+  const visibleNumbers = filteredNumbers.slice(0, visibleCount);
 
   // --- FILES LOGIC ---
-  const loadFiles = async (path: string) => {
-    try {
-      const r = ref(storage, path);
-      const res = await listAll(r);
-      const fs = res.prefixes.map(p => ({ name: p.name, type: 'folder' as const, fullPath: p.fullPath }));
-      const is = await Promise.all(res.items.map(async i => ({ name: i.name, type: 'file' as const, fullPath: i.fullPath, url: await getDownloadURL(i) })));
-      // Folders first
-      setFiles([...fs, ...is]);
-      setSelectedFiles([]); // Clear selection on path change
-    } catch {}
-  };
-  
+  const loadFiles = async (path: string) => { try { const r = ref(storage, path); const res = await listAll(r); const fs = res.prefixes.map(p => ({ name: p.name, type: 'folder' as const, fullPath: p.fullPath })); const is = await Promise.all(res.items.map(async i => ({ name: i.name, type: 'file' as const, fullPath: i.fullPath, url: await getDownloadURL(i) }))); setFiles([...fs, ...is]); setSelectedFiles([]); } catch {} };
   useEffect(() => { if (activeSection === 'files') loadFiles(currentPath); }, [activeSection, currentPath]);
-  
-  const handleFolderClick = (folderPath: string) => {
-      setPathHistory(prev => [...prev, currentPath]);
-      setCurrentPath(folderPath);
-  };
-
-  const handleNavigateBack = () => {
-      if (pathHistory.length > 0) {
-          const newHistory = [...pathHistory];
-          const prevPath = newHistory.pop();
-          setPathHistory(newHistory);
-          setCurrentPath(prevPath || '');
-      }
-  };
-
+  const handleFolderClick = (folderPath: string) => { setPathHistory(prev => [...prev, currentPath]); setCurrentPath(folderPath); };
+  const handleNavigateBack = () => { if (pathHistory.length > 0) { const newHistory = [...pathHistory]; const prevPath = newHistory.pop(); setPathHistory(newHistory); setCurrentPath(prevPath || ''); } };
   const handleCreateFolder = async (name: string) => { try { await uploadBytes(ref(storage, `${currentPath ? currentPath + '/' : ''}${name}/.placeholder`), new Blob([''])); setShowFolderModal(false); setFolderName(''); loadFiles(currentPath); } catch {} };
-
   const handleUploadFile = async (file: File) => { try { const path = `${currentPath ? currentPath + '/' : ''}${file.name}`; await uploadBytes(ref(storage, path), file); loadFiles(currentPath); } catch (e) { console.error(e); } };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      await handleUploadFile(file);
-      e.target.value = '';
-    }
-  };
-
-  // File Selection
-  const toggleFileSelection = (path: string) => {
-      setSelectedFiles(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]);
-  };
-
-  const handleSelectAll = () => {
-      if (selectedFiles.length === files.length) setSelectedFiles([]);
-      else setSelectedFiles(files.map(f => f.fullPath));
-  };
-
-  const deleteFolderRecursive = async (path: string) => {
-      try {
-          const list = await listAll(ref(storage, path));
-          await Promise.all(list.items.map(i => deleteObject(i)));
-          await Promise.all(list.prefixes.map(p => deleteFolderRecursive(p.fullPath)));
-      } catch (e) { console.error("Recursive delete failed", e); }
-  };
-
-  const handleBulkFileDelete = async () => {
-      showConfirm(`Delete ${selectedFiles.length} items? This cannot be undone.`, async () => {
-        for (const path of selectedFiles) {
-            const file = files.find(f => f.fullPath === path);
-            if (file?.type === 'folder') {
-               await deleteFolderRecursive(path);
-            } else {
-               try { await deleteObject(ref(storage, path)); } catch {}
-            }
-        }
-        setSelectedFiles([]);
-        loadFiles(currentPath);
-      });
-  };
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file && file.type === 'application/pdf') { await handleUploadFile(file); e.target.value = ''; } };
+  const toggleFileSelection = (path: string) => { setSelectedFiles(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]); };
+  const handleSelectAll = () => { if (selectedFiles.length === files.length) setSelectedFiles([]); else setSelectedFiles(files.map(f => f.fullPath)); };
+  const deleteFolderRecursive = async (path: string) => { try { const list = await listAll(ref(storage, path)); await Promise.all(list.items.map(i => deleteObject(i))); await Promise.all(list.prefixes.map(p => deleteFolderRecursive(p.fullPath))); } catch (e) { console.error("Recursive delete failed", e); } };
+  const handleBulkFileDelete = async () => { showConfirm(`Delete ${selectedFiles.length} items? This cannot be undone.`, async () => { for (const path of selectedFiles) { const file = files.find(f => f.fullPath === path); if (file?.type === 'folder') { await deleteFolderRecursive(path); } else { try { await deleteObject(ref(storage, path)); } catch {} } } setSelectedFiles([]); loadFiles(currentPath); }); };
 
   // --- SHOTS LOGIC ---
-  const loadShots = async () => { try { const r = await listAll(ref(storage, 'Captured-Shots')); setShots(await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name })))); } catch {} };
-   const loadShotsWithOwners = async () => {
-      try {
-         const r = await listAll(ref(storage, 'Captured-Shots'));
-         const raw = await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name })));
-         // Parse owner number from filename like Shot_<number>_<ts>.png
-         const enhanced = await Promise.all(raw.map(async (s) => {
-            const parts = s.name.split('_');
-            const ownerNum = parts.length >= 2 ? parts[1] : 'Unknown';
-            let ownerName = 'Unknown';
-            try {
-               const d = await getDoc(doc(db, 'Numbers', ownerNum));
-               if (d.exists()) ownerName = d.data().Name || 'Unknown';
-            } catch {}
-            return { ...s, ownerNumber: ownerNum, ownerName };
-         }));
-         setShots(enhanced as any[]);
-      } catch (e) { console.warn('Load shots failed', e); }
-   };
+   const loadShotsWithOwners = async () => { try { const r = await listAll(ref(storage, 'Captured-Shots')); const raw = await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name }))); const enhanced = await Promise.all(raw.map(async (s) => { const parts = s.name.split('_'); const ownerNum = parts.length >= 2 ? parts[1] : 'Unknown'; let ownerName = 'Unknown'; try { const d = await getDoc(doc(db, 'Numbers', ownerNum)); if (d.exists()) ownerName = d.data().Name || 'Unknown'; } catch {} return { ...s, ownerNumber: ownerNum, ownerName }; })); setShots(enhanced as any[]); } catch (e) { console.warn('Load shots failed', e); } };
    useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
-
-   // Fetch Firebase usage
-   useEffect(() => {
-     if (activeSection === 'firebase') {
-       const fetchUsage = async () => {
-         try {
-           const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-           const result = await getUsage();
-           setFirebaseUsage(result.data as any);
-         } catch (error) {
-           console.error('Failed to fetch Firebase usage:', error);
-         }
-       };
-       fetchUsage();
-     }
-   }, [activeSection]);
-
-   // Keyboard navigation for shots
-   useEffect(() => {
-     if (activeSection !== 'shots') return;
-     const handleKeyDown = (e: KeyboardEvent) => {
-       if (e.key === 'ArrowLeft') {
-         setCurrentShotIndex(p => Math.max(0, p - 1));
-       } else if (e.key === 'ArrowRight') {
-         setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1));
-       }
-     };
-     window.addEventListener('keydown', handleKeyDown);
-     return () => window.removeEventListener('keydown', handleKeyDown);
-   }, [activeSection, shots.length]);
+   useEffect(() => { if (activeSection !== 'shots') return; const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'ArrowLeft') { setCurrentShotIndex(p => Math.max(0, p - 1)); } else if (e.key === 'ArrowRight') { setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1)); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [activeSection, shots.length]);
   const handleDeleteShot = async () => { showConfirm("Delete?", async () => { try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch {} }); };
 
-  const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
+  // --- FIREBASE USAGE LOGIC (UPDATED) ---
+   useEffect(() => {
+    if (activeSection === 'firebase') {
+      const fetchUsage = async () => {
+        setLoadingUsage(true);
+        try {
+          const getUsage = httpsCallable(functions, 'getFirebaseUsage');
+          const result = await getUsage({ mode: usageViewMode });
+          const data = result.data as any;
 
+          // Process Data for Cumulative View (Billing/Quota modes)
+          const shouldAccumulate = usageViewMode === 'quota' || usageViewMode === 'billing';
+          
+          const processSeries = (series: any[]) => {
+            if (!series) return [];
+            if (!shouldAccumulate) return series;
+            // Create cumulative sum
+            let sum = 0;
+            return series.map(item => {
+              sum += item.value;
+              return { ...item, value: sum };
+            });
+          };
+
+          if (data?.firestore) {
+            data.firestore.reads.data = processSeries(data.firestore.reads.data);
+            data.firestore.writes.data = processSeries(data.firestore.writes.data);
+          }
+          if (data?.storage) {
+            data.storage.bandwidth.data = processSeries(data.storage.bandwidth.data);
+            data.storage.requests.data = processSeries(data.storage.requests.data);
+          }
+
+          setFirebaseUsage(data);
+          setLastUpdated(new Date());
+        } catch (error) {
+          console.error('Failed to fetch Firebase usage:', error);
+        } finally {
+          setLoadingUsage(false);
+        }
+      };
+
+      fetchUsage();
+      const interval = setInterval(fetchUsage, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [activeSection, usageViewMode]);
+
+  const tableTabs = ['numbers', 'blocked', 'snitches', 'brokers'];
 
   return (
     <div className="flex h-screen overflow-hidden bg-black">
@@ -526,7 +373,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </div>
       </aside>
 
-      {/* Mobile backdrop to close sidebar when clicking outside */}
       {sidebarOpen && <div className="mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
 
       {/* MAIN */}
@@ -540,11 +386,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
            <button onClick={() => setShowSettingsModal(true)} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><Settings size={14} /> Settings</button>
         </header>
 
-        <div className="content-body">
+        <div className="content-body custom-scrollbar">
           {activeSection === 'tables' && (
             <div className="h-full flex flex-col gap-4">
-              
-              {/* TABLE TOOLBAR */}
               <div className={`table-toolbar justify-between gap-3 ${isMobile ? 'flex-col' : 'flex-row'}`}>
                 {isMobile ? (
                   <div className="relative w-full" ref={tableNavRef}>
@@ -554,13 +398,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     {showTableNavMenu && (
                       <div className="options-menu" style={{ top: '100%', right: 'auto', left: 0, width: '100%', marginTop: '8px', transformOrigin: 'top center' }}>
                         {tableTabs.map((tab) => (
-                          <button
-                            key={tab}
-                            onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }}
-                            className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/10 text-white' : ''}`}
-                          >
-                            {activeTableTab === tab && <Check size={14} />}
-                            <span className="flex-1">{tab}</span>
+                          <button key={tab} onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }} className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/10 text-white' : ''}`}>
+                            {activeTableTab === tab && <Check size={14} />} <span className="flex-1">{tab}</span>
                           </button>
                         ))}
                       </div>
@@ -568,15 +407,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   </div>
                 ) : (
                   <div className="table-nav">
-                    {tableTabs.map((tab) => (
-                      <button
-                        key={tab}
-                        onClick={() => setActiveTableTab(tab as any)}
-                        className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}
-                      >
-                        {tab}
-                      </button>
-                    ))}
+                    {tableTabs.map((tab) => ( <button key={tab} onClick={() => setActiveTableTab(tab as any)} className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}>{tab}</button> ))}
                   </div>
                 )}
                  <div className={`flex gap-3 items-center ${isMobile ? 'flex-col w-full' : 'flex-row'}`}>
@@ -589,13 +420,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               </div>
 
               <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                <div className="absolute inset-0 overflow-auto custom-scrollbar">
+                <div ref={tableContainerRef} className="absolute inset-0 overflow-auto custom-scrollbar">
                   <table className="admin-table">
                     <thead>
                        <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th>Name</th><th>Quiz Times</th><th>Screened</th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th>Status</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>)}</tr>
                     </thead>
                     <tbody>
-                        {(activeTableTab === 'numbers' ? filteredNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
+                        {(activeTableTab === 'numbers' ? visibleNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
                         <tr key={item.id}>
                             {activeTableTab === 'numbers' && (
                             <>
@@ -700,10 +531,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </tbody>
                   </table>
                 </div>
+
               </div>
             </div>
           )}
-          
           {activeSection === 'files' && (
              <div className="h-full flex flex-col gap-4">
                 <div className="flex items-center justify-between">
@@ -712,9 +543,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       <div className="flex items-center bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-muted font-mono"><span onClick={() => { setCurrentPath(''); setPathHistory([]); }} className="cursor-pointer hover:text-white">root/</span>{currentPath}</div>
                    </div>
                    <div className="flex items-center gap-2">
-                     {selectedFiles.length > 0 && (
-                        <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>
-                     )}
+                     {selectedFiles.length > 0 && <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>}
                      <div className="view-toggle-group mr-2">
                         <button onClick={() => setFileViewMode('grid')} className={`view-toggle-btn ${fileViewMode === 'grid' ? 'active' : ''}`}><LayoutGrid size={16} /></button>
                         <button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button>
@@ -726,7 +555,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 
                 <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
                   <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
-                    
                     {fileViewMode === 'grid' ? (
                        <div className="file-grid-layout">
                            {files.map(file => {
@@ -747,32 +575,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                        </div>
                     ) : (
                        <div className="flex flex-col gap-1">
-                          {/* File List Header */}
                           <div className="file-table-layout px-4 py-3 text-xs font-bold text-muted uppercase border-b border-white/10 items-center bg-white/5 rounded-t-lg">
-                             <div onClick={handleSelectAll} className="cursor-pointer hover:text-white flex items-center">
-                                {selectedFiles.length === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
-                             </div>
-                             <div className="flex justify-center"><FolderOpen size={14} className="opacity-0" /></div> {/* Spacer for alignment */}
+                             <div onClick={handleSelectAll} className="cursor-pointer hover:text-white flex items-center">{selectedFiles.length === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}</div>
+                             <div className="flex justify-center"><FolderOpen size={14} className="opacity-0" /></div>
                              <span>Name</span>
                              <span className="text-right">Action</span>
                           </div>
-                          
-                          {/* File Rows */}
                           <div className="flex flex-col">
                             {files.map(file => {
                                const isSelected = selectedFiles.includes(file.fullPath);
                                return (
                                  <div key={file.fullPath} onClick={() => file.type === 'folder' && handleFolderClick(file.fullPath)} className={`file-table-layout px-4 py-3 items-center rounded-lg cursor-pointer border-b border-white/5 last:border-0 transition-colors ${isSelected ? 'bg-primary/10 border-primary/20' : 'hover:bg-white/5'}`}>
-                                    <div onClick={(e) => { e.stopPropagation(); toggleFileSelection(file.fullPath); }} className="cursor-pointer text-muted hover:text-white flex items-center">
-                                       {isSelected ? <CheckSquare size={16} className="text-primary" /> : <Square size={16} />}
-                                    </div>
-                                    <div className="flex justify-center">
-                                       {file.type === 'folder' ? <FolderOpen size={18} className="text-amber-500" /> : <FileText size={18} className="text-primary" />}
-                                    </div>
+                                    <div onClick={(e) => { e.stopPropagation(); toggleFileSelection(file.fullPath); }} className="cursor-pointer text-muted hover:text-white flex items-center">{isSelected ? <CheckSquare size={16} className="text-primary" /> : <Square size={16} />}</div>
+                                    <div className="flex justify-center">{file.type === 'folder' ? <FolderOpen size={18} className="text-amber-500" /> : <FileText size={18} className="text-primary" />}</div>
                                     <span className="text-sm text-white truncate pr-4">{file.name}</span>
-                                    <div className="flex justify-end">
-                                       {file.type === 'file' && <a href={file.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="p-2 text-muted hover:text-white"><Download size={14} /></a>}
-                                    </div>
+                                    <div className="flex justify-end">{file.type === 'file' && <a href={file.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="p-2 text-muted hover:text-white"><Download size={14} /></a>}</div>
                                  </div>
                                );
                             })}
@@ -780,7 +597,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           {files.length === 0 && <div className="text-center text-muted py-10 opacity-50">Empty Directory</div>}
                        </div>
                     )}
-
                   </div>
                 </div>
              </div>
@@ -799,10 +615,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           </div>
                        </div>
                     ) : (
-                       <div className="text-muted flex flex-col items-center gap-4">
-                          <Camera size={48} className="opacity-20" />
-                          <p>No screenshots captured</p>
-                       </div>
+                       <div className="text-muted flex flex-col items-center gap-4"><Camera size={48} className="opacity-20" /><p>No screenshots captured</p></div>
                     )}
                   </div>
                 </div>
@@ -823,250 +636,254 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
           {activeSection === 'firebase' && (
             <div className="h-full flex flex-col gap-6">
-              <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-1 gap-6">
-                <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><Database size={20} /> User Count</h3>
-                  <div className="text-3xl font-bold text-primary">{numbers.length}</div>
-                  <p className="text-sm text-muted">Total registered users</p>
+
+              {/* Header & Controls */}
+              <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                <div className="bg-surface border border-white/10 rounded-xl p-4 shadow-2xl flex items-center gap-4 min-w-[200px]">
+                  <div className="p-3 bg-primary/10 rounded-lg text-primary"><Database size={24} /></div>
+                  <div>
+                    <div className="text-2xl font-bold text-white">
+                      {loadingUsage ? '...' : numbers.length}
+                    </div>
+                    <p className="text-xs text-muted">Total Users</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 items-end">
+                  <div className="relative w-full sm:w-[220px]">
+                    <button onClick={(e) => { e.stopPropagation(); setShowUsageDropdown(!showUsageDropdown); }} className="btn btn-secondary w-full sm:min-w-[220px] justify-between">
+                      <span>
+                        {usageViewMode === '24h' && 'Last 24 Hours'}
+                        {usageViewMode === '7d' && 'Last 7 Days'}
+                        {usageViewMode === '30d' && 'Last 30 Days'}
+                        {usageViewMode === 'billing' && 'Current Month'}
+                        {usageViewMode === 'quota' && 'Today\'s Quota'}
+                      </span>
+                      <ChevronDown size={16} className={`transition-transform ${showUsageDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showUsageDropdown && (
+                      <div className="options-menu w-full md:w-[220px] z-50">
+                        <button onClick={() => { setUsageViewMode('24h'); setShowUsageDropdown(false); }} className={`options-item ${usageViewMode === '24h' ? 'bg-white/10' : ''}`}>
+                          <Clock size={14} /> Last 24 Hours
+                        </button>
+                        <button onClick={() => { setUsageViewMode('7d'); setShowUsageDropdown(false); }} className={`options-item ${usageViewMode === '7d' ? 'bg-white/10' : ''}`}>
+                          <Calendar size={14} /> Last 7 Days
+                        </button>
+                        <button onClick={() => { setUsageViewMode('30d'); setShowUsageDropdown(false); }} className={`options-item ${usageViewMode === '30d' ? 'bg-white/10' : ''}`}>
+                          <Calendar size={14} /> Last 30 Days
+                        </button>
+                         <div className="options-divider" />
+                        <button onClick={() => { setUsageViewMode('billing'); setShowUsageDropdown(false); }} className={`options-item ${usageViewMode === 'billing' ? 'bg-white/10' : ''}`}>
+                          <FileText size={14} /> Billing (Month)
+                        </button>
+                        <button onClick={() => { setUsageViewMode('quota'); setShowUsageDropdown(false); }} className={`options-item ${usageViewMode === 'quota' ? 'bg-white/10' : ''}`}>
+                          <ShieldAlert size={14} /> Today's Quota
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {lastUpdated && <p className="text-xs text-muted">Updated: {lastUpdated.toLocaleTimeString()}</p>}
                 </div>
               </div>
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Reads ({(() => { const total = firebaseUsage?.firestore?.reads?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.firestore?.reads || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="readsGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#ef476f" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#ef476f" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" />
-                        <YAxis stroke="#ccc" />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
-                        <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#readsGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Writes ({(() => { const total = firebaseUsage?.firestore?.writes?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.firestore?.writes || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="writesGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#ffd166" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#ffd166" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" />
-                        <YAxis stroke="#ccc" />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
-                        <Area type="monotone" dataKey="value" stroke="#ffd166" fill="url(#writesGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+
+              {/* Content */}
+              {loadingUsage && !firebaseUsage ? (
+                <div className="flex-1 flex items-center justify-center text-muted">
+                  <div className="animate-pulse">Loading usage data...</div>
                 </div>
-                <div className="grid grid-cols-1 gap-6">
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Firestore Deletes ({(() => { const total = firebaseUsage?.firestore?.deletes?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.firestore?.deletes || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="deletesGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#06d6a0" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#06d6a0" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" />
-                        <YAxis stroke="#ccc" />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
-                        <Area type="monotone" dataKey="value" stroke="#06d6a0" fill="url(#deletesGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
+              ) : (
+                <div className="space-y-8 overflow-y-auto custom-scrollbar pb-10">
+                  
+                  {/* Row 1: Firestore */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* READS */}
+                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                      <h3 className="text-lg font-semibold text-white mb-4">
+                        Firestore Reads ({firebaseUsage?.firestore?.reads?.total?.toLocaleString() || 0})
+                      </h3>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={firebaseUsage?.firestore?.reads?.data || []}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
+                          <XAxis 
+                            dataKey="timestamp" 
+                            tick={<CustomAxisTick />} 
+                            minTickGap={30}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis stroke="#ccc" fontSize={12} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val} />
+                          <Tooltip 
+                            cursor={{fill: 'rgba(255,255,255,0.1)'}}
+                            content={<CustomTooltip limit={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.reads : null} />} 
+                          />
+                          <ReferenceLine 
+                            y={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.reads : undefined} 
+                            stroke="#ef476f" 
+                            strokeDasharray="5 5" 
+                            label={usageViewMode === 'quota' ? { value: "Daily Limit: 50k", position: "insideTopRight", fill: "#ef476f" } : undefined} 
+                          />
+                          <Bar dataKey="value" name="Reads" fill="#ef476f" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* WRITES */}
+                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                      <h3 className="text-lg font-semibold text-white mb-4">
+                        Firestore Writes ({firebaseUsage?.firestore?.writes?.total?.toLocaleString() || 0})
+                      </h3>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={firebaseUsage?.firestore?.writes?.data || []}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
+                          <XAxis 
+                            dataKey="timestamp" 
+                            tick={<CustomAxisTick />} 
+                            minTickGap={30}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis stroke="#ccc" fontSize={12} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val} />
+                          <Tooltip 
+                            cursor={{fill: 'rgba(255,255,255,0.1)'}}
+                            content={<CustomTooltip limit={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.writes : null} />} 
+                          />
+                          <ReferenceLine 
+                            y={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.writes : undefined} 
+                            stroke="#ffd166" 
+                            strokeDasharray="5 5" 
+                            label={usageViewMode === 'quota' ? { value: "Daily Limit: 20k", position: "insideTopRight", fill: "#ffd166" } : undefined} 
+                          />
+                          <Bar dataKey="value" name="Writes" fill="#ffd166" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
+
+                  {/* Row 2: Storage */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* BANDWIDTH */}
+                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                      <h3 className="text-lg font-semibold text-white mb-4">
+                        Bandwidth ({(firebaseUsage?.storage?.bandwidth?.total / (1024 * 1024)).toFixed(2) || '0'} MB)
+                      </h3>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={firebaseUsage?.storage?.bandwidth?.data || []}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
+                          <XAxis 
+                            dataKey="timestamp" 
+                            tick={<CustomAxisTick />} 
+                            minTickGap={30}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis 
+                            stroke="#ccc" 
+                            fontSize={12} 
+                            tickFormatter={(val) => (val / (1024*1024)).toFixed(1) + 'MB'} 
+                          />
+                          <Tooltip
+                            cursor={{fill: 'rgba(255,255,255,0.1)'}}
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length && label) {
+                                const mb = (Number(payload[0].value) / (1024 * 1024)).toFixed(2);
+                                return (
+                                   <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                     <p className="text-xs text-muted">{new Date(label as number).toLocaleString()}</p>
+                                     <p className="text-sm font-bold text-white">{mb} MB</p>
+                                   </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Bar dataKey="value" name="Bandwidth" fill="#06d6a0" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* STORAGE TOTALS & REQUESTS */}
+                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl flex flex-col">
+                      <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Storage Size</h3>
+                          <p className="text-xs text-muted">Total Files Stored</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-bold text-primary">
+                            {(firebaseUsage?.storage?.bytesStored / (1024 * 1024)).toFixed(2) || '0'} MB
+                          </div>
+                          <div className="text-xs text-white">
+                            {firebaseUsage?.storage?.objectCount || 0} Files
+                          </div>
+                        </div>
+                      </div>
+
+                      <h3 className="text-lg font-semibold text-white mb-4">Requests ({firebaseUsage?.storage?.requests?.total?.toLocaleString() || 0})</h3>
+                      <div className="flex-1 min-h-[150px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={firebaseUsage?.storage?.requests?.data || []}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
+                            <XAxis 
+                              dataKey="timestamp" 
+                              tick={<CustomAxisTick />} 
+                              minTickGap={30}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <YAxis stroke="#ccc" fontSize={12} />
+                            <Tooltip cursor={{fill: 'rgba(255,255,255,0.1)'}} />
+                            <Bar dataKey="value" name="Requests" fill="#118ab2" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Storage Bytes Stored ({firebaseUsage?.storage?.bytesStored?.[firebaseUsage.storage.bytesStored.length - 1]?.value ? firebaseUsage.storage.bytesStored[firebaseUsage.storage.bytesStored.length - 1].value.toFixed(2) + ' MB' : '0 MB'})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.storage?.bytesStored || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="bytesGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#118ab2" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#118ab2" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" interval={0} angle={-45} textAnchor="end" height={60} />
-                        <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bytes Stored']} />
-                        <Area type="monotone" dataKey="value" stroke="#118ab2" fill="url(#bytesGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Storage Bandwidth Sent ({firebaseUsage?.storage?.bandwidthSent?.reduce((sum: number, p: any) => sum + p.value, 0) ? firebaseUsage.storage.bandwidthSent.reduce((sum: number, p: any) => sum + p.value, 0).toFixed(2) + ' MB' : '0 MB'})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.storage?.bandwidthSent || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="bandwidthGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#073b4c" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#073b4c" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" interval={0} angle={-45} textAnchor="end" height={60} />
-                        <YAxis stroke="#ccc" tickFormatter={(value) => value.toFixed(0) + ' MB'} />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} formatter={(value) => [(value as number).toFixed(2) + ' MB', 'Bandwidth Sent']} />
-                        <Area type="monotone" dataKey="value" stroke="#073b4c" fill="url(#bandwidthGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 gap-6">
-                  <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
-                    <h3 className="text-lg font-semibold text-white mb-4">Storage Requests ({(() => { const total = firebaseUsage?.storage?.requests?.reduce((sum: number, p: any) => sum + p.value, 0) || 0; return total >= 1000 ? (total / 1000).toFixed(1) + 'K' : total; })()})</h3>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={(firebaseUsage?.storage?.requests || []).filter((item: any, index: number) => isMobile ? index % 5 === 0 : true)}>
-                        <defs>
-                          <linearGradient id="requestsGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#ef476f" stopOpacity={0.8} />
-                            <stop offset="100%" stopColor="#ef476f" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                        <XAxis dataKey="date" stroke="#ccc" />
-                        <YAxis stroke="#ccc" />
-                        <Tooltip contentStyle={{ backgroundColor: '#333', border: 'none' }} />
-                        <Area type="monotone" dataKey="value" stroke="#ef476f" fill="url(#requestsGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
       </main>
 
-      {/* NUMBER INFO MODAL */}
-      {showInfoModal && activeInfo?.type === 'number' && (
+      {/* INFO MODAL */}
+      {showInfoModal && (
         <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-lg p-0 relative flex flex-col">
-            {/* 1. Header */}
+          <div className="modal-content modal-md p-0 relative flex flex-col">
             <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
               <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
               <div className="flex flex-col items-center w-full">
-                <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
-                  <BookOpen size={28} />
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Number Info</h2>
-                <p className="text-muted text-sm text-center">Login attempts for: <span className="font-mono text-white">{activeInfo.data.number}</span></p>
+                <div className="w-20 h-20 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow"><BookOpen className="icon-large" /></div>
+                <h2 className="text-2xl font-bold text-white mb-2">{activeInfo?.type === 'number' ? 'User Info' : 'Broker Info'}</h2>
+                <p className="text-muted text-sm text-center">Data for: <span className="font-mono text-white">{activeInfo?.data.number}</span></p>
               </div>
             </div>
-
-            {/* 2. Scrollable Body */}
-            <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0" style={{ overflow: 'scroll' }}>
+            <div ref={modalScrollRef} className="flex-grow overflow-y-auto custom-scrollbar min-h-0" style={{ overflow: 'scroll' }}>
               <div className="p-6 md:p-8">
-                {loginAttemptsData.length > 0 ? (
-                  <div className="overflow-x-auto max-h-[200px] overflow-y-auto custom-scrollbar">
-                    <table className="admin-table w-full">
-                      <thead>
-                        <tr>
-                          <th>Device ID</th>
-                          <th>Code</th>
-                          <th>Date</th>
-                          <th>Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {loginAttemptsData.map((attempt) => (
-                          <tr key={attempt.attemptId}>
-                            <td className="font-mono text-muted truncate max-w-xs">{attempt.deviceId}</td>
-                            <td className="font-mono text-white select-text">{attempt.Code}</td>
-                            <td className="text-muted">{attempt.Date}</td>
-                            <td className="text-muted">{attempt.Time}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center text-muted text-sm py-10">
-                    <p>No recorded login attempts.</p>
-                  </div>
+                {activeInfo?.type === 'number' && (
+                   loginAttemptsData.length > 0 ? (
+                    <div className="overflow-x-auto max-h-[200px] overflow-y-auto custom-scrollbar">
+                      <table className="admin-table w-full">
+                        <thead><tr><th>Device ID</th><th>Code</th><th>Date</th><th>Time</th></tr></thead>
+                        <tbody>{loginAttemptsData.slice(0, visibleAttempts).map((attempt) => (<tr key={attempt.attemptId}><td className="font-mono text-muted truncate max-w-xs">{attempt.deviceId}</td><td className="font-mono text-white select-text">{attempt.Code}</td><td className="text-muted">{attempt.Date}</td><td className="text-muted">{attempt.Time}</td></tr>))}</tbody>
+                      </table>
+                    </div>
+                  ) : <div className="text-center text-muted text-sm py-10"><p>No recorded login attempts.</p></div>
+                )}
+                {activeInfo?.type === 'broker' && (
+                   activeInfo.data.attempts.length > 0 ? (
+                    <div className="overflow-x-auto max-h-60 overflow-y-auto custom-scrollbar">
+                      <table className="admin-table w-full">
+                        <thead><tr><th>Password</th><th>Date</th><th>Time</th></tr></thead>
+                        <tbody>{activeInfo.data.attempts.map((attempt, index) => (<tr key={index}><td className="font-mono text-white select-text">{attempt.Password || 'N/A'}</td><td className="text-muted">{attempt.Date}</td><td className="text-muted">{attempt.Time}</td></tr>))}</tbody>
+                      </table>
+                    </div>
+                  ) : <div className="text-center text-muted text-sm py-10"><p>No recorded attempts.</p></div>
                 )}
               </div>
             </div>
-
-            {/* 3. Footer */}
-            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
-              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BROKER INFO MODAL */}
-      {showInfoModal && activeInfo?.type === 'broker' && (
-        <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-lg p-0 relative flex flex-col">
-            {/* 1. Header */}
-            <div className="p-6 md:p-8 flex-shrink-0 border-b border-white/10">
-              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
-              <div className="flex flex-col items-center w-full">
-                <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-4 text-primary shadow-glow">
-                  <BookOpen size={28} />
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Broker Info</h2>
-                <p className="text-muted text-sm text-center">Attempts for: <span className="font-mono text-white">{activeInfo.data.number}</span> <span className="text-xs bg-white/10 text-white font-bold px-2 py-1 rounded-md ml-2">{activeInfo.data.count}</span></p>
-              </div>
-            </div>
-            
-            {/* 2. Scrollable Body */}
-            <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
-              <div className="p-6 md:p-8">
-                {activeInfo.data.attempts.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="admin-table w-full">
-                      <thead>
-                        <tr>
-                          <th>Password</th>
-                          <th>Date</th>
-                          <th>Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...activeInfo.data.attempts].reverse().map((attempt, index) => (
-                          <tr key={index}>
-                            <td className="font-mono text-white select-text">{attempt.Password || 'N/A'}</td>
-                            <td className="text-muted">{attempt.Date}</td>
-                            <td className="text-muted">{attempt.Time}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center text-muted text-sm py-10">
-                    <p>No recorded attempts.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 3. Footer */}
-            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10">
-              <button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">
-                Close
-              </button>
-            </div>
+            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10"><button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">Close</button></div>
           </div>
         </div>
       )}
@@ -1075,15 +892,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {showConfirmModal && (
         <div className="modal-overlay animate-fade-in" style={{ zIndex: 130000 }}>
           <div className="modal-content modal-sm p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-white">Confirm Action</h3>
-              <button onClick={() => setShowConfirmModal(false)} className="btn-icon"><X size={20} /></button>
-            </div>
+            <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-white">Confirm Action</h3><button onClick={() => setShowConfirmModal(false)} className="btn-icon"><X size={20} /></button></div>
             <p className="text-muted mb-8">{confirmMessage}</p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowConfirmModal(false)} className="btn btn-ghost">Cancel</button>
-              <button onClick={() => { onConfirmAction(); setShowConfirmModal(false); }} className="btn btn-danger">Confirm</button>
-            </div>
+            <div className="flex justify-end gap-3"><button onClick={() => setShowConfirmModal(false)} className="btn btn-ghost">Cancel</button><button onClick={() => { onConfirmAction(); setShowConfirmModal(false); }} className="btn btn-danger">Confirm</button></div>
           </div>
         </div>
       )}
@@ -1092,17 +903,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {showFolderModal && (
         <div className="modal-overlay animate-fade-in">
           <div className="modal-content modal-md p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-white">Create New Folder</h3>
-              <button onClick={() => setShowFolderModal(false)} className="btn-icon"><X size={20} /></button>
-            </div>
-            <div className="space-y-4">
-              <input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="Folder name" className="login-input w-full" />
-            </div>
-            <div className="flex justify-end gap-3 mt-8">
-              <button onClick={() => setShowFolderModal(false)} className="btn btn-ghost">Cancel</button>
-              <button onClick={() => { if (folderName) { handleCreateFolder(folderName); } }} className="btn btn-primary">Create</button>
-            </div>
+            <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-white">Create New Folder</h3><button onClick={() => setShowFolderModal(false)} className="btn-icon"><X size={20} /></button></div>
+            <div className="space-y-4"><input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="Folder name" className="login-input w-full" /></div>
+            <div className="flex justify-end gap-3 mt-8"><button onClick={() => setShowFolderModal(false)} className="btn btn-ghost">Cancel</button><button onClick={() => { if (folderName) { handleCreateFolder(folderName); } }} className="btn btn-primary">Create</button></div>
           </div>
         </div>
       )}
@@ -1110,76 +913,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {/* HIDDEN UPLOAD INPUT */}
       <input ref={uploadInputRef} type="file" accept=".pdf" onChange={handleFileChange} style={{ display: 'none' }} />
 
-      {/* MODALS */}
+      {/* ADD USER MODAL */}
       {showAddModal && (
         <div className="modal-overlay">
            <div className="modal-content modal-md p-8">
-              <div className="flex justify-between items-center mb-8">
-                 <div>
-                    <h3 className="text-2xl font-bold text-white">Add New User</h3>
-                    <p className="text-muted text-sm mt-1">Create a new user account</p>
-                 </div>
-                 <button onClick={() => setShowAddModal(false)} className="btn-icon"><X size={20} /></button>
+              <div className="flex justify-between items-center mb-8"><div><h3 className="text-2xl font-bold text-white">Add New User</h3><p className="text-muted text-sm mt-1">Create a new user account</p></div><button onClick={() => setShowAddModal(false)} className="btn-icon"><X size={20} /></button></div>
+              <div className="flex flex-col gap-3">
+                 <div className="form-field"><label className="text-xs text-muted block uppercase font-bold tracking-wider">Phone Number</label><input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Enter 11 digits" className="login-input w-full" /></div>
+                 <div className="form-field"><label className="text-xs text-muted block uppercase font-bold tracking-wider">PDF Permission</label><div className="relative"><button onClick={() => setShowPdfDropdown(!showPdfDropdown)} className="login-input appearance-none bg-surface cursor-pointer text-left flex items-center justify-between"><span>{newPdfDown ? "Allowed" : "Blocked (Default)"}</span><ChevronDown size={16} className={`text-muted transition-transform ${showPdfDropdown ? 'rotate-180' : ''}`} /></button>{showPdfDropdown && (<div className="pdf-dropdown"><button onClick={() => { setNewPdfDown(false); setShowPdfDropdown(false); }} className="options-item">Blocked (Default)</button><button onClick={() => { setNewPdfDown(true); setShowPdfDropdown(false); }} className="options-item">Allowed</button></div>)}</div></div>
               </div>
-
-              <div className="space-y-6">
-                 <div>
-                    <label className="text-xs text-muted mb-2 block uppercase font-bold tracking-wider">Phone Number</label>
-                    <input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Enter 11 digits" className="login-input w-full" />
-                 </div>
-                 
-                 <div>
-                    <label className="text-xs text-muted mb-3 block uppercase font-bold tracking-wider">PDF Permission</label>
-                    <div className="relative">
-                       <select value={newPdfDown ? "true" : "false"} onChange={e => setNewPdfDown(e.target.value === "true")} className="login-input appearance-none bg-surface cursor-pointer">
-                          <option value="false">Blocked (Default)</option>
-                          <option value="true">Allowed</option>
-                       </select>
-                       <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                          </svg>
-                       </div>
-                    </div>
-                 </div>
-              </div>
-
-              <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/10">
-                 <button onClick={() => setShowAddModal(false)} className="btn btn-ghost">Cancel</button>
-                 <button onClick={handleCreateUser} className="btn btn-primary">Create User</button>
-              </div>
+              <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/10"><button onClick={() => setShowAddModal(false)} className="btn btn-ghost">Cancel</button><button onClick={handleCreateUser} className="btn btn-primary">Create User</button></div>
            </div>
         </div>
       )}
       
+      {/* SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="modal-overlay">
            <div className="modal-content modal-md p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className={`font-bold text-white ${isMobile ? 'text-lg' : 'text-xl'}`}>System Settings</h3>
-                <button onClick={() => setShowSettingsModal(false)} className="btn-icon"><X size={20} /></button>
-              </div>
+              <div className="flex justify-between items-center mb-6"><h3 className={`font-bold text-white ${isMobile ? 'text-lg' : 'text-xl'}`}>System Settings</h3><button onClick={() => setShowSettingsModal(false)} className="btn-icon"><X size={20} /></button></div>
               <div className="space-y-4 mb-8">
-                 <div className="settings-row">
-                    <span className="settings-label">Global Quiz Access</span>
-                    <button onClick={() => setGlobalQuiz(!globalQuiz)} className={`toggle-switch ${globalQuiz ? 'active' : ''}`}>
-                       <div className="toggle-thumb" />
-                    </button>
-                 </div>
-                 <div className="settings-row">
-                    <span className="settings-label">Global PDF Downloads</span>
-                    <button onClick={() => setGlobalPdf(!globalPdf)} className={`toggle-switch ${globalPdf ? 'active' : ''}`}>
-                       <div className="toggle-thumb" />
-                    </button>
-                 </div>
+                 <div className="settings-row"><span className="settings-label">Global Quiz Access</span><button onClick={() => setGlobalQuiz(!globalQuiz)} className={`toggle-switch ${globalQuiz ? 'active' : ''}`}><div className="toggle-thumb" /></button></div>
+                 <div className="settings-row"><span className="settings-label">Global PDF Downloads</span><button onClick={() => setGlobalPdf(!globalPdf)} className={`toggle-switch ${globalPdf ? 'active' : ''}`}><div className="toggle-thumb" /></button></div>
               </div>
               <div className={`flex items-center ${isMobile ? 'flex-col gap-4' : 'justify-between'}`}>
                 <button onClick={handleClearAllScreened} className={`btn btn-danger ${isMobile ? 'w-full' : ''}`}>Clear All Screened</button>
-                <button onClick={async () => {
-                  try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); }
-                  catch (e) { console.warn('Failed to save settings', e); }
-                  setShowSettingsModal(false);
-                }} className={`btn btn-primary ${isMobile ? 'w-full' : ''}`}>Save Changes</button>
+                <button onClick={async () => { try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); } catch (e) { console.warn('Failed to save settings', e); } setShowSettingsModal(false); }} className={`btn btn-primary ${isMobile ? 'w-full' : ''}`}>Save Changes</button>
               </div>
            </div>
         </div>

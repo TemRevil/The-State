@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { storage, auth, db, functions } from '../firebaseConfig';
 import { ref, listAll, getMetadata, uploadBytes } from 'firebase/storage';
@@ -269,7 +268,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   </div>
                 </div>
             )}
-            {(isAdmin || isMobile) && ( <button onClick={() => setShowAdminLogin(true)} className={`nav-btn mb-1 ${!isAdmin && 'hidden'}`}> <ShieldCheck size={16} /> Admin </button> )}
+            <button onClick={() => setShowAdminLogin(true)} className="nav-btn mb-1"> <ShieldCheck size={16} /> Management </button>
             <button onClick={onLogout} className="nav-btn mb-1"> <LogOut size={16} /> Logout </button>
         </div>
       </aside>
@@ -332,20 +331,28 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       )}
       {showAdminLogin && (
         <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-sm p-8 relative">
-            <button onClick={() => setShowAdminLogin(false)} className="btn-icon absolute top-4 right-4"><X size={20} /></button>
-            <div className="flex flex-col items-center">
-              <div className="w-14 h-14 rounded-2xl bg-surface border border-white/10 flex items-center justify-center mb-6 text-primary shadow-glow"> <ShieldCheck size={28} /> </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Admin Access</h2>
-              <p className="text-muted text-sm mb-8 text-center">Restricted area. Authentication required.</p>
-              <form onSubmit={handleAdminLoginSubmit} className="w-full flex flex-col gap-4">
-                <div className="relative">
-                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
-                   <input ref={passwordInputRef} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Security Code" className="login-input pl-12" />
-                </div>
-                {adminError && <div className="text-center text-xs text-error py-2 bg-red-500/10 rounded-lg border border-red-500/20">{adminError}</div>}
-                <button type="submit" disabled={adminLoading} className="btn btn-primary w-full"> {adminLoading ? <Loader2 size={20} className="animate-spin" /> : 'Authenticate'} </button>
-              </form>
+          <div className="admin-login-modal modal-content p-8 relative">
+            <button onClick={() => setShowAdminLogin(false)} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
+            <div className="admin-login-container">
+              <div className="admin-login-image">
+                <img src="dist/assets/user.jpg" alt="Security" />
+              </div>
+              <div className="admin-login-form">
+                <h2 className="text-3xl font-bold text-white mb-2">Management Access</h2>
+                <p className="text-sm text-white mb-6" style={{ lineHeight: '1.6' }}>
+                  Getting in while it's none of your business, will cause you trouble!
+                </p>
+                <form onSubmit={handleAdminLoginSubmit} className="flex flex-col gap-4">
+                  <div className="relative">
+                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
+                     <input ref={passwordInputRef} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Security Code" className="login-input pl-12 w-full" />
+                  </div>
+                  {adminError && <div className="text-xs text-error py-2 px-4 bg-red-500/10 rounded-lg border border-red-500/20 text-center">{adminError}</div>}
+                  <button type="submit" disabled={adminLoading} className="btn btn-primary w-full"> 
+                    {adminLoading ? <Loader2 size={20} className="animate-spin" /> : 'Authenticate'} 
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
