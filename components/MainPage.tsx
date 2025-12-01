@@ -206,22 +206,25 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   }, []);
 
   useEffect(() => {
-    const handleViolation = () => {
-      if (violation) return;
-      setViolation(true);
-    };
-
+    // Handle visibility change - just close PDF silently if user switches tabs
     const handleVisibilityChange = () => {
       if (document.hidden && selectedPdf) {
-        handleViolation();
+        // User switched tabs/windows - just close PDF silently, no violation
+        setSelectedPdf(null);
+        setViolation(false);
       } else if (document.hidden) {
         setIsFocusLost(true);
       }
     };
     const handleBlur = () => {
       if (document.activeElement instanceof HTMLIFrameElement) return;
-      if (selectedPdf) handleViolation();
-      else setIsFocusLost(true);
+      if (selectedPdf) {
+        // User clicked away - just close PDF silently, no violation
+        setSelectedPdf(null);
+        setViolation(false);
+      } else {
+        setIsFocusLost(true);
+      }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
@@ -229,7 +232,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [selectedPdf, violation]);
+  }, [selectedPdf]);
 
   useEffect(() => {
     if (!selectedPdf) { setViolation(false); return; }
@@ -263,8 +266,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     let volumeUpPressed = false;
     let volumeDownPressed = false;
     let volumeButtonPressTime = 0;
-    let lastVisibilityChange = 0;
-    let powerButtonSuspected = false;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Standard screenshot shortcuts
@@ -316,30 +317,8 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       }
     };
 
-    // Enhanced visibility change detection (power button + screenshot combo)
-    const handleVisibilityChange = () => {
-      const now = Date.now();
-      // If visibility changes rapidly, might indicate power button + screenshot
-      if (now - lastVisibilityChange < 1000 && document.hidden) {
-        powerButtonSuspected = true;
-        setTimeout(() => {
-          if (powerButtonSuspected && !document.hidden) {
-            handleViolation();
-            powerButtonSuspected = false;
-          }
-        }, 500);
-      }
-      lastVisibilityChange = now;
-      
-      if (document.hidden && selectedPdf) {
-        // If hidden while PDF is open, might be screenshot attempt
-        setTimeout(() => {
-          if (document.hidden) {
-            handleViolation();
-          }
-        }, 300);
-      }
-    };
+    // Note: Visibility change is handled separately above to just close PDF silently
+    // Only actual screenshot attempts (keys, touches) trigger violations here
 
     // Media key events (alternative volume button detection)
     const handleMediaKey = (e: any) => {
@@ -355,21 +334,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     // Enhanced touch detection (three touch method + volume button simulation)
     const handleTouchStart = (e: TouchEvent) => { 
       if (e.touches.length >= 3) { 
-        e.preventDefault(); 
         handleViolation(); 
       }
       // If touching while volume buttons might be pressed (heuristic)
       if (e.touches.length >= 2 && (volumeUpPressed || volumeDownPressed)) {
-        e.preventDefault();
         handleViolation();
-      }
-    };
-
-    // Detect when page becomes visible again after being hidden (power button release)
-    const handleFocus = () => {
-      if (powerButtonSuspected && !document.hidden) {
-        handleViolation();
-        powerButtonSuspected = false;
       }
     };
 
@@ -377,8 +346,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     window.addEventListener('keyup', handleKeyUp, true); 
     window.addEventListener('copy', handleCopy, true); 
     window.addEventListener('touchstart', handleTouchStart, true);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleFocus);
     
     // Try to capture media keys
     try {
@@ -392,8 +359,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       window.removeEventListener('keyup', handleKeyUp, true); 
       window.removeEventListener('copy', handleCopy, true); 
       window.removeEventListener('touchstart', handleTouchStart, true);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
       try {
         window.removeEventListener('keydown', handleMediaKey, true);
       } catch (e) {}
@@ -927,46 +892,63 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     return (
                       <div 
                         key={i}
-                        className={`p-4 rounded-lg border-2 ${
-                          isCorrect ? 'border-green-500/50 bg-green-500/10' : 'border-red-500/50 bg-red-500/10'
-                        }`}
+                        className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}
                       >
-                        <div className="flex items-start gap-3 mb-2">
+                        <div className="flex items-start gap-3 mb-4">
                           {isCorrect ? (
-                            <CheckCircle size={20} className="text-green-500 flex-shrink-0 mt-1" />
+                            <div className="quiz-result-icon-wrapper correct">
+                              <CheckCircle size={24} className="quiz-result-icon correct" />
+                            </div>
                           ) : (
-                            <XCircle size={20} className="text-red-500 flex-shrink-0 mt-1" />
+                            <div className="quiz-result-icon-wrapper wrong">
+                              <XCircle size={24} className="quiz-result-icon wrong" />
+                            </div>
                           )}
                           <p 
-                            className="text-white font-medium flex-1"
+                            className="quiz-result-question"
                             style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
                           >
                             {i + 1}. {q.question}
                           </p>
                         </div>
                         
-                        <div className="ml-8 space-y-2">
+                        <div className="ml-11 space-y-3">
                           {userAns && (
-                            <div className={isCorrect ? 'text-green-400' : 'text-red-400'}>
-                              <span className="font-medium">Your answer: </span>
-                              <span style={{ direction: getTextDirection(userAns) }}>{userAns}</span>
+                            <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
+                              <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
+                              <span 
+                                className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`}
+                                style={{ direction: getTextDirection(userAns) }}
+                              >
+                                {userAns}
+                              </span>
                             </div>
                           )}
                           {!userAns && (
-                            <div className="text-muted">
-                              <span className="font-medium">Not answered</span>
+                            <div className="quiz-answer-box not-answered">
+                              <span className="quiz-answer-label not-answered">Not answered</span>
                             </div>
                           )}
                           {!isCorrect && (
-                            <div className="text-green-400">
-                              <span className="font-medium">Correct answer: </span>
-                              <span style={{ direction: getTextDirection(q.correct_answer) }}>{q.correct_answer}</span>
+                            <div className="quiz-answer-box correct">
+                              <span className="quiz-answer-label correct">Correct answer: </span>
+                              <span 
+                                className="quiz-answer-text correct"
+                                style={{ direction: getTextDirection(q.correct_answer) }}
+                              >
+                                {q.correct_answer}
+                              </span>
                             </div>
                           )}
                           {q.explanation && (
-                            <div className="explanation-divider">
-                              <span className="font-medium">Explanation: </span>
-                              <span style={{ direction: getTextDirection(q.explanation) }}>{q.explanation}</span>
+                            <div className="quiz-explanation-box">
+                              <span className="quiz-explanation-label">Explanation: </span>
+                              <span 
+                                className="quiz-explanation-text"
+                                style={{ direction: getTextDirection(q.explanation) }}
+                              >
+                                {q.explanation}
+                              </span>
                             </div>
                           )}
                         </div>

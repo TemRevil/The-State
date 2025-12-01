@@ -97,37 +97,26 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length >= 3) {
-        e.preventDefault();
         onViolation();
       }
       if (e.touches.length >= 2 && (volumeUpPressed || volumeDownPressed)) {
-        e.preventDefault();
         onViolation();
       }
     };
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setTimeout(() => {
-          if (document.hidden) {
-            onViolation();
-          }
-        }, 300);
-      }
-    };
+    // Note: Visibility change is handled by parent component to close PDF silently
+    // Only actual screenshot attempts (keys, touches) trigger violations here
 
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp, true);
     window.addEventListener('copy', handleCopy, true);
     window.addEventListener('touchstart', handleTouchStart, true);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('copy', handleCopy, true);
       window.removeEventListener('touchstart', handleTouchStart, true);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [pdf, violation, onViolation]);
 
