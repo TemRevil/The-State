@@ -37,6 +37,100 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Additional screenshot detection layer in PDF viewer
+  useEffect(() => {
+    if (!pdf || violation) return;
+
+    let volumeUpPressed = false;
+    let volumeDownPressed = false;
+    let volumeButtonPressTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Volume button detection
+      if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
+        volumeUpPressed = true;
+        volumeButtonPressTime = Date.now();
+        if (volumeDownPressed) {
+          e.preventDefault();
+          onViolation();
+        }
+      }
+      
+      if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
+        volumeDownPressed = true;
+        volumeButtonPressTime = Date.now();
+        if (volumeUpPressed) {
+          e.preventDefault();
+          onViolation();
+        }
+      }
+
+      // Standard screenshot shortcuts
+      if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && (e.key === 'p' || e.key === 's'))) {
+        e.preventDefault();
+        onViolation();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'PrintScreen') onViolation();
+      
+      if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
+        volumeUpPressed = false;
+        if (Date.now() - volumeButtonPressTime > 200 && volumeDownPressed) {
+          onViolation();
+        }
+      }
+      
+      if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
+        volumeDownPressed = false;
+        if (Date.now() - volumeButtonPressTime > 200 && volumeUpPressed) {
+          onViolation();
+        }
+      }
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      onViolation();
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 3) {
+        e.preventDefault();
+        onViolation();
+      }
+      if (e.touches.length >= 2 && (volumeUpPressed || volumeDownPressed)) {
+        e.preventDefault();
+        onViolation();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTimeout(() => {
+          if (document.hidden) {
+            onViolation();
+          }
+        }, 300);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('copy', handleCopy, true);
+    window.addEventListener('touchstart', handleTouchStart, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('copy', handleCopy, true);
+      window.removeEventListener('touchstart', handleTouchStart, true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [pdf, violation, onViolation]);
+
   // Load PDF from Firebase
   useEffect(() => {
     if (!pdf) {
@@ -107,17 +201,40 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       if (!canvasElement) return;
 
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: zoom });
       
-      canvasElement.width = viewport.width;
-      canvasElement.height = viewport.height;
+      // Get device pixel ratio for high-DPI displays
+      const devicePixelRatio = window.devicePixelRatio || 1;
+      // Use a quality multiplier (2x) for extra sharpness
+      const qualityMultiplier = 2;
+      
+      // Calculate display viewport (what user sees)
+      const displayViewport = page.getViewport({ scale: zoom });
+      // Calculate render viewport (high resolution for quality)
+      const renderScale = zoom * devicePixelRatio * qualityMultiplier;
+      const renderViewport = page.getViewport({ scale: renderScale });
+      
+      // Set canvas internal size to high resolution
+      canvasElement.width = renderViewport.width;
+      canvasElement.height = renderViewport.height;
+      
+      // Set canvas display size (CSS size) to match zoom level
+      canvasElement.style.width = `${displayViewport.width}px`;
+      canvasElement.style.height = `${displayViewport.height}px`;
 
-      const context = canvasElement.getContext('2d');
+      const context = canvasElement.getContext('2d', {
+        alpha: false, // Disable alpha for better performance
+        desynchronized: false, // Better quality
+        willReadFrequently: false
+      });
       if (!context) return;
+
+      // Enable high-quality image smoothing
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
 
       const renderContext = {
         canvasContext: context,
-        viewport: viewport
+        viewport: renderViewport,
       };
 
       await page.render(renderContext).promise;

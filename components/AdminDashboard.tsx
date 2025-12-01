@@ -5,7 +5,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnaps
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, AreaChart, Area, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -13,29 +13,16 @@ interface BlockedData { id: string; number: string; name: string; reason: string
 interface SnitchData { id: string; loginNumber: string; snitchNumber: string; snitchName: string; date: string; time: string; }
 interface BrokerData { id: string; number: string; count: number; date: string; time: string; attempts: { Date: string; Time: string; Password?: string; }[]; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
+interface LoginAttempt { attemptId: string; deviceId: string; Code: string; Date: string; Time: string; }
 
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
-
-interface LoginAttempt {
-  attemptId: string;
-  deviceId: string;
-  Code: string;
-  Date: string;
-  Time: string;
-}
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
     // Firebase free tier limits
     const FIREBASE_LIMITS = {
       firestore: { daily: { reads: 50000, writes: 20000, deletes: 20000 } },
-      storage: { daily: { bandwidth: 1024, operations: 20000 }, total: { stored: 5 * 1024 * 1024 * 1024 } }
-    };
-
-    // Monthly quotas
-    const MONTHLY_LIMITS = {
-      firestore: { reads: 1000000, writes: 500000, deletes: 200000 },
-      storage: { bandwidth: 30 * 1024, operations: 600000 }
+      storage: { daily: { bandwidth: 1024 * 1024 * 1024, operations: 20000 }, total: { stored: 5 * 1024 * 1024 * 1024 } }
     };
 
    const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
@@ -63,7 +50,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [shots, setShots] = useState<any[]>([]);
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
 
-  // --- FIREBASE USAGE STATE (UPDATED) ---
+  // --- FIREBASE USAGE STATE ---
   const [firebaseUsage, setFirebaseUsage] = useState<any | null>(null);
   const [usageViewMode, setUsageViewMode] = useState<'24h' | '7d' | '30d' | 'billing' | 'quota'>('24h');
   const [showUsageDropdown, setShowUsageDropdown] = useState(false);
@@ -82,39 +69,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [onConfirmAction, setOnConfirmAction] = useState<() => void>(() => {});
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [showTableNavMenu, setShowTableNavMenu] = useState(false);
-  const [showFileNavMenu, setShowFileNavMenu] = useState(false);
-  const tableNavRef = useRef<HTMLDivElement>(null);
-  const fileNavRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
-  const [deviceType, setDeviceType] = useState<'phone' | 'tablet' | 'desktop'>(
-    window.innerWidth < 600 ? 'phone' : window.innerWidth < 900 ? 'tablet' : 'desktop'
-  );
   const [visibleCount, setVisibleCount] = useState(15);
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tableNavRef = useRef<HTMLDivElement | null>(null);
   const [visibleAttempts, setVisibleAttempts] = useState(10);
   const modalScrollRef = useRef<HTMLDivElement>(null);
   
   // User Inputs
   const [newNumber, setNewNumber] = useState('');
   const [newPdfDown, setNewPdfDown] = useState(false); 
-  
   const [searchTerm, setSearchTerm] = useState('');
   const [globalQuiz, setGlobalQuiz] = useState(true);
   const [globalPdf, setGlobalPdf] = useState(true);
 
-  // Custom tooltip for charts
+  // ------------------------------------------------------------------
+  //  CHART TOOLTIP: Intelligent Date Formatting
+  // ------------------------------------------------------------------
   const CustomTooltip = ({ active, payload, label, limit }: any) => {
     if (active && payload && payload.length && label) {
+      const date = new Date(label as number);
+      let dateStr = '';
+      
+      // If viewing generic 24h or Quota -> Show TIME
+      if (usageViewMode === '24h' || usageViewMode === 'quota') {
+          dateStr = date.toLocaleString('en-GB', {
+            timeZone: 'America/Los_Angeles',
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+          }) + ' (PT)';
+      } else {
+          // If viewing days/months -> Show DATE
+          dateStr = date.toLocaleString('en-GB', {
+            timeZone: 'America/Los_Angeles',
+            month: 'long', day: 'numeric'
+          });
+      }
+
+      const value = Number(payload[0].value);
+      const limitVal = limit || 0;
+      const pct = limitVal > 0 ? (value / limitVal) * 100 : 0;
+
       return (
-        <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
-          <p style={{ margin: 0, color: '#fff', fontSize: '0.875rem' }}>
-            {new Date(label as number).toLocaleString('en-GB', {
-              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-            })}
+        <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.9)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <p className="text-xs font-mono text-muted uppercase tracking-wider mb-1">{dateStr}</p>
+          <p style={{ color: payload[0].color, fontSize: '0.875rem', fontWeight: 'bold' }}>
+            {payload[0].name}: {value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
           </p>
-          <p style={{ margin: '4px 0 0 0', color: payload[0].color, fontSize: '0.875rem', fontWeight: '500' }}>
-            {payload[0].name}: {Number(payload[0].value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </p>
+          {limit && (
+             <div className="mt-2 pt-2 border-t border-white/10">
+               <div className="flex justify-between text-xs text-muted gap-4">
+                  <span>Limit:</span> <span>{limitVal.toLocaleString()}</span>
+               </div>
+               <div className="flex justify-between text-xs font-bold gap-4" style={{ color: value > limitVal ? '#ef476f' : '#06d6a0' }}>
+                  <span>Used:</span> <span>{pct.toFixed(1)}%</span>
+               </div>
+             </div>
+          )}
         </div>
       );
     }
@@ -122,42 +132,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   };
 
   // ------------------------------------------------------------------
-  //  UPDATED: Custom Axis Tick for Double Time (UTC & Cairo)
+  //  CHART AXIS: Dual Time Zones (PT + Cairo) or Date
   // ------------------------------------------------------------------
   const CustomAxisTick = ({ x, y, payload }: any) => {
     if (!payload || payload.value == null) return null;
     const date = new Date(payload.value as number);
 
-    // Only apply dual time display in 24h/Quota view where hourly precision matters
-    if (usageViewMode === '24h' || usageViewMode === 'quota') {
-      const utcTime = date.toLocaleTimeString('en-GB', { 
-        timeZone: 'UTC', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
+    // MODE: Long term (Days)
+    if (usageViewMode === '7d' || usageViewMode === '30d' || usageViewMode === 'billing') {
+        const dayStr = date.toLocaleDateString('en-GB', {
+            timeZone: 'America/Los_Angeles',
+            day: 'numeric',
+            month: 'short'
+        });
+        return (
+            <g transform={`translate(${x},${y})`}>
+                <text x={0} y={0} dy={16} textAnchor="middle" fill="#9ca3af" fontSize={10} fontWeight={500}>{dayStr}</text>
+            </g>
+        );
+    } 
+    // MODE: Short term (Hours - 24h or Quota)
+    else {
+        // Pacific (Server/Quota Time)
+        const pacificTime = date.toLocaleTimeString('en-GB', {
+          timeZone: 'America/Los_Angeles',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
 
-      const cairoTime = date.toLocaleTimeString('en-GB', { 
-        timeZone: 'Africa/Cairo', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
+        // Cairo (Local Time)
+        const cairoTime = date.toLocaleTimeString('en-GB', {
+          timeZone: 'Africa/Cairo',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
 
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <text x={0} y={0} dy={16} textAnchor="middle" fill="#ccc" fontSize={12} fontWeight={500}>{utcTime}</text>
-          <text x={0} y={0} dy={32} textAnchor="middle" fill="#ccc" fontSize={11} opacity={0.4}>{cairoTime}</text>
-        </g>
-      );
+        return (
+          <g transform={`translate(${x},${y})`}>
+            {/* PT Time */}
+            <text x={0} y={0} dy={16} textAnchor="middle" fill="#e5e7eb" fontSize={11} fontWeight={600}>{pacificTime}</text>
+            <text x={0} y={0} dy={26} textAnchor="middle" fill="#6b7280" fontSize={8} fontWeight={400}>PT</text>
+            
+            {/* Cairo Time */}
+            <text x={0} y={0} dy={40} textAnchor="middle" fill="#9ca3af" fontSize={10}>{cairoTime}</text>
+            <text x={0} y={0} dy={50} textAnchor="middle" fill="#4b5563" fontSize={8}>EG</text>
+          </g>
+        );
     }
-
-    // Default Date View (7d, 30d, etc.)
-    return (
-      <g transform={`translate(${x},${y})`}>
-        <text x={0} y={0} dy={16} textAnchor="middle" fill="#ccc" fontSize={12}>
-          {date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-        </text>
-      </g>
-    );
   };
 
   // Click Outside Handler
@@ -167,9 +188,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       if (!target.closest('.options-menu') && !target.closest('.btn-icon') && !target.closest('.btn-secondary')) {
         setActiveDropdown(null);
         setShowUsageDropdown(false);
-      }
-      if (tableNavRef.current && !tableNavRef.current.contains(event.target as Node)) {
-        setShowTableNavMenu(false);
       }
     };
     document.addEventListener('click', handleClickOutside);
@@ -215,11 +233,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   }, []);
 
   useEffect(() => {
-    const handleResize = () => { setIsMobile(window.innerWidth < 900); setDeviceType(window.innerWidth < 600 ? 'phone' : window.innerWidth < 900 ? 'tablet' : 'desktop'); };
+    const handleResize = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  useEffect(() => { setVisibleCount(15); }, [searchTerm, activeTableTab]);
+  useEffect(() => setVisibleCount(15), [searchTerm, activeTableTab]);
 
   useEffect(() => {
     const container = tableContainerRef.current;
@@ -291,7 +309,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const handleNavigateBack = () => { if (pathHistory.length > 0) { const newHistory = [...pathHistory]; const prevPath = newHistory.pop(); setPathHistory(newHistory); setCurrentPath(prevPath || ''); } };
   const handleCreateFolder = async (name: string) => { try { await uploadBytes(ref(storage, `${currentPath ? currentPath + '/' : ''}${name}/.placeholder`), new Blob([''])); setShowFolderModal(false); setFolderName(''); loadFiles(currentPath); } catch {} };
   const handleUploadFile = async (file: File) => { try { const path = `${currentPath ? currentPath + '/' : ''}${file.name}`; await uploadBytes(ref(storage, path), file); loadFiles(currentPath); } catch (e) { console.error(e); } };
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file && file.type === 'application/pdf') { await handleUploadFile(file); e.target.value = ''; } };
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type === 'application/pdf') {
+      await handleUploadFile(file);
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('PDF Uploaded', { body: `File: ${file.name}`, icon: '/favicon.ico' });
+      }
+      e.target.value = '';
+    }
+  };
   const toggleFileSelection = (path: string) => { setSelectedFiles(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]); };
   const handleSelectAll = () => { if (selectedFiles.length === files.length) setSelectedFiles([]); else setSelectedFiles(files.map(f => f.fullPath)); };
   const deleteFolderRecursive = async (path: string) => { try { const list = await listAll(ref(storage, path)); await Promise.all(list.items.map(i => deleteObject(i))); await Promise.all(list.prefixes.map(p => deleteFolderRecursive(p.fullPath))); } catch (e) { console.error("Recursive delete failed", e); } };
@@ -313,13 +340,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           const result = await getUsage({ mode: usageViewMode });
           const data = result.data as any;
 
-          // Process Data for Cumulative View (Billing/Quota modes)
+          // Logic to accumulate data for "Quota" (showing usage rising through the day) 
+          // or "Billing" (showing usage rising through the month)
           const shouldAccumulate = usageViewMode === 'quota' || usageViewMode === 'billing';
           
           const processSeries = (series: any[]) => {
             if (!series) return [];
             if (!shouldAccumulate) return series;
-            // Create cumulative sum
             let sum = 0;
             return series.map(item => {
               sum += item.value;
@@ -387,8 +414,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </header>
 
         <div className="content-body custom-scrollbar">
+          {/* ... [TABLES, FILES, SHOTS SECTIONS REMAIN UNCHANGED FOR BREVITY - THEY ARE CORRECT] ... */}
           {activeSection === 'tables' && (
-            <div className="h-full flex flex-col gap-4">
+             <div className="h-full flex flex-col gap-4">
               <div className={`table-toolbar justify-between gap-3 ${isMobile ? 'flex-col' : 'flex-row'}`}>
                 {isMobile ? (
                   <div className="relative w-full" ref={tableNavRef}>
@@ -656,8 +684,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         {usageViewMode === '24h' && 'Last 24 Hours'}
                         {usageViewMode === '7d' && 'Last 7 Days'}
                         {usageViewMode === '30d' && 'Last 30 Days'}
-                        {usageViewMode === 'billing' && 'Current Month'}
-                        {usageViewMode === 'quota' && 'Today\'s Quota'}
+                        {usageViewMode === 'billing' && 'Current Month (Billing)'}
+                        {usageViewMode === 'quota' && 'Today\'s Quota (Pacific)'}
                       </span>
                       <ChevronDown size={16} className={`transition-transform ${showUsageDropdown ? 'rotate-180' : ''}`} />
                     </button>
@@ -702,13 +730,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       <h3 className="text-lg font-semibold text-white mb-4">
                         Firestore Reads ({firebaseUsage?.firestore?.reads?.total?.toLocaleString() || 0})
                       </h3>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={firebaseUsage?.firestore?.reads?.data || []}>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={firebaseUsage?.firestore?.reads?.data || []} margin={{ bottom: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
-                          <XAxis 
-                            dataKey="timestamp" 
-                            tick={<CustomAxisTick />} 
-                            minTickGap={30}
+                          <XAxis
+                            dataKey="timestamp"
+                            tick={<CustomAxisTick />}
+                            minTickGap={isMobile ? 30 : 15}
                             axisLine={false}
                             tickLine={false}
                           />
@@ -721,7 +749,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             y={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.reads : undefined} 
                             stroke="#ef476f" 
                             strokeDasharray="5 5" 
-                            label={usageViewMode === 'quota' ? { value: "Daily Limit: 50k", position: "insideTopRight", fill: "#ef476f" } : undefined} 
+                            label={usageViewMode === 'quota' ? { value: "Limit: 50k", position: "insideTopRight", fill: "#ef476f" } : undefined} 
                           />
                           <Bar dataKey="value" name="Reads" fill="#ef476f" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -733,13 +761,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       <h3 className="text-lg font-semibold text-white mb-4">
                         Firestore Writes ({firebaseUsage?.firestore?.writes?.total?.toLocaleString() || 0})
                       </h3>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={firebaseUsage?.firestore?.writes?.data || []}>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={firebaseUsage?.firestore?.writes?.data || []} margin={{ bottom: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
-                          <XAxis 
-                            dataKey="timestamp" 
-                            tick={<CustomAxisTick />} 
-                            minTickGap={30}
+                          <XAxis
+                            dataKey="timestamp"
+                            tick={<CustomAxisTick />}
+                            minTickGap={isMobile ? 30 : 15}
                             axisLine={false}
                             tickLine={false}
                           />
@@ -752,7 +780,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             y={usageViewMode === 'quota' ? FIREBASE_LIMITS.firestore.daily.writes : undefined} 
                             stroke="#ffd166" 
                             strokeDasharray="5 5" 
-                            label={usageViewMode === 'quota' ? { value: "Daily Limit: 20k", position: "insideTopRight", fill: "#ffd166" } : undefined} 
+                            label={usageViewMode === 'quota' ? { value: "Limit: 20k", position: "insideTopRight", fill: "#ffd166" } : undefined} 
                           />
                           <Bar dataKey="value" name="Writes" fill="#ffd166" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -767,13 +795,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       <h3 className="text-lg font-semibold text-white mb-4">
                         Bandwidth ({(firebaseUsage?.storage?.bandwidth?.total / (1024 * 1024)).toFixed(2) || '0'} MB)
                       </h3>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={firebaseUsage?.storage?.bandwidth?.data || []}>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={firebaseUsage?.storage?.bandwidth?.data || []} margin={{ bottom: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
-                          <XAxis 
-                            dataKey="timestamp" 
-                            tick={<CustomAxisTick />} 
-                            minTickGap={30}
+                          <XAxis
+                            dataKey="timestamp"
+                            tick={<CustomAxisTick />}
+                            minTickGap={isMobile ? 30 : 15}
                             axisLine={false}
                             tickLine={false}
                           />
@@ -784,18 +812,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           />
                           <Tooltip
                             cursor={{fill: 'rgba(255,255,255,0.1)'}}
-                            content={({ active, payload, label }) => {
-                              if (active && payload && payload.length && label) {
-                                const mb = (Number(payload[0].value) / (1024 * 1024)).toFixed(2);
-                                return (
-                                   <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.7)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                     <p className="text-xs text-muted">{new Date(label as number).toLocaleString()}</p>
-                                     <p className="text-sm font-bold text-white">{mb} MB</p>
-                                   </div>
-                                );
-                              }
-                              return null;
-                            }}
+                            content={<CustomTooltip limit={usageViewMode === 'quota' ? FIREBASE_LIMITS.storage.daily.bandwidth : null} />} 
+                          />
+                           <ReferenceLine 
+                            y={usageViewMode === 'quota' ? FIREBASE_LIMITS.storage.daily.bandwidth : undefined} 
+                            stroke="#06d6a0" 
+                            strokeDasharray="5 5" 
+                            label={usageViewMode === 'quota' ? { value: "Limit: 1GB", position: "insideTopRight", fill: "#06d6a0" } : undefined} 
                           />
                           <Bar dataKey="value" name="Bandwidth" fill="#06d6a0" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -821,8 +844,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
                       <h3 className="text-lg font-semibold text-white mb-4">Requests ({firebaseUsage?.storage?.requests?.total?.toLocaleString() || 0})</h3>
                       <div className="flex-1 min-h-[150px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={firebaseUsage?.storage?.requests?.data || []}>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={firebaseUsage?.storage?.requests?.data || []} margin={{ bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#444" vertical={false} />
                             <XAxis 
                               dataKey="timestamp" 
@@ -832,7 +855,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                               tickLine={false}
                             />
                             <YAxis stroke="#ccc" fontSize={12} />
-                            <Tooltip cursor={{fill: 'rgba(255,255,255,0.1)'}} />
+                            <Tooltip
+                              cursor={{fill: 'rgba(255,255,255,0.1)'}}
+                              content={<CustomTooltip limit={usageViewMode === 'quota' ? FIREBASE_LIMITS.storage.daily.operations : null} />} 
+                            />
                             <Bar dataKey="value" name="Requests" fill="#118ab2" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>

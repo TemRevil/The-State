@@ -87,12 +87,29 @@ const App: React.FC = () => {
     } else if (resetType === 'daily-utc') {
       resetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0));
     } else {
-      // Daily Pacific
-      const pacificOffset = getPacificOffset(now);
-      const pacificNow = new Date(now.getTime() + (pacificOffset * 60 * 60 * 1000));
-      const pacificMidnight = new Date(pacificNow);
-      pacificMidnight.setHours(24, 0, 0, 0);
-      resetTime = new Date(pacificMidnight.getTime() - (pacificOffset * 60 * 60 * 1000));
+      // Daily Pacific - reset at Pacific midnight
+      const offset = getPacificOffset(now);
+      const resetHourUTC = -offset; // 8 or 7
+      const currentUTCHours = now.getUTCHours();
+      const currentUTCFullYear = now.getUTCFullYear();
+      const currentUTCMonth = now.getUTCMonth();
+      const currentUTCDate = now.getUTCDate();
+      let resetUTCDate = currentUTCDate;
+      let resetUTCMonth = currentUTCMonth;
+      let resetUTCYear = currentUTCFullYear;
+      if (currentUTCHours >= resetHourUTC) {
+        resetUTCDate += 1;
+        const daysInMonth = new Date(currentUTCFullYear, currentUTCMonth + 1, 0).getDate();
+        if (resetUTCDate > daysInMonth) {
+          resetUTCDate = 1;
+          resetUTCMonth += 1;
+          if (resetUTCMonth > 11) {
+            resetUTCMonth = 0;
+            resetUTCYear += 1;
+          }
+        }
+      }
+      resetTime = new Date(Date.UTC(resetUTCYear, resetUTCMonth, resetUTCDate, resetHourUTC, 0, 0, 0));
     }
 
     const timeUntilReset = resetTime.getTime() - now.getTime();
@@ -127,21 +144,19 @@ const App: React.FC = () => {
   const checkLimits = async () => {
     try {
       const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-      // Use 'limits' mode to get both daily and monthly data at once
-      const result = await getUsage({ mode: 'limits' });
+      const result = await getUsage({ mode: '30d' });
       const data = result.data as any;
-  
-      if (!data || !data.daily || !data.monthly || !data.storage) {
-        console.error('Invalid data structure from getFirebaseUsage (limits mode):', data);
+
+      if (!data || !data.firestore || !data.storage) {
+        console.error('Invalid data structure from getFirebaseUsage:', data);
         setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
         return;
       }
-  
+
       console.log('Limit Check Data:', data);
 
       // Extract Totals
-      const daily = data.daily;
-      const monthly = data.monthly;
+      const monthly = data;
       const totalStorageStored = data.storage.bytesStored;
 
       let limitExceeded = false;
@@ -150,56 +165,32 @@ const App: React.FC = () => {
       let usage = '';
       let limit = '';
   
-      // 1. Check DAILY Firestore Limits (Priority)
-      if (daily.firestore.reads > LIMITS.firestore.daily.reads) {
-        limitExceeded = true;
-        reason = 'Daily Firestore reads exceeded';
-        usage = daily.firestore.reads.toLocaleString();
-        limit = LIMITS.firestore.daily.reads.toLocaleString();
-        resetType = 'daily-pacific';
-      } else if (daily.firestore.writes > LIMITS.firestore.daily.writes) {
-        limitExceeded = true;
-        reason = 'Daily Firestore writes exceeded';
-        usage = daily.firestore.writes.toLocaleString();
-        limit = LIMITS.firestore.daily.writes.toLocaleString();
-        resetType = 'daily-pacific';
-      } else if (daily.firestore.deletes > LIMITS.firestore.daily.deletes) {
-        limitExceeded = true;
-        reason = 'Daily Firestore deletes exceeded';
-        usage = daily.firestore.deletes.toLocaleString();
-        limit = LIMITS.firestore.daily.deletes.toLocaleString();
-        resetType = 'daily-pacific';
-      }
-      // 2. Check DAILY Storage Limits
-      else if (daily.storage.bandwidth > LIMITS.storage.daily.bandwidth) {
-        limitExceeded = true;
-        reason = 'Daily Storage bandwidth exceeded';
-        usage = `${(daily.storage.bandwidth / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-        limit = `${(LIMITS.storage.daily.bandwidth / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-        resetType = 'daily-pacific';
-      }
-
-      // 3. Check MONTHLY Firestore Limits
-      else if (monthly.firestore.reads > LIMITS.firestore.monthly.reads) {
+      // Check MONTHLY Firestore Limits
+      console.log(`Monthly Firestore reads: ${monthly.firestore.reads.total.toLocaleString()} / ${LIMITS.firestore.monthly.reads.toLocaleString()}`);
+      if (monthly.firestore.reads.total > LIMITS.firestore.monthly.reads) {
         limitExceeded = true;
         reason = 'Monthly Firestore read limit exceeded';
-        usage = monthly.firestore.reads.toLocaleString();
+        usage = monthly.firestore.reads.total.toLocaleString();
         limit = LIMITS.firestore.monthly.reads.toLocaleString();
         resetType = 'monthly-utc';
-      } else if (monthly.firestore.writes > LIMITS.firestore.monthly.writes) {
-        limitExceeded = true;
-        reason = 'Monthly Firestore write limit exceeded';
-        usage = monthly.firestore.writes.toLocaleString();
-        limit = LIMITS.firestore.monthly.writes.toLocaleString();
-        resetType = 'monthly-utc';
-      }
-      // 4. Check Total Storage Limits
-      else if (totalStorageStored > LIMITS.storage.total.stored) {
-        limitExceeded = true;
-        reason = 'Total Storage capacity exceeded';
-        usage = `${(totalStorageStored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-        limit = `${(LIMITS.storage.total.stored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-        resetType = 'monthly-utc';
+      } else {
+        console.log(`Monthly Firestore writes: ${monthly.firestore.writes.total.toLocaleString()} / ${LIMITS.firestore.monthly.writes.toLocaleString()}`);
+        if (monthly.firestore.writes.total > LIMITS.firestore.monthly.writes) {
+          limitExceeded = true;
+          reason = 'Monthly Firestore write limit exceeded';
+          usage = monthly.firestore.writes.total.toLocaleString();
+          limit = LIMITS.firestore.monthly.writes.toLocaleString();
+          resetType = 'monthly-utc';
+        } else {
+          console.log(`Total Storage: ${(totalStorageStored / (1024 * 1024 * 1024)).toFixed(2)} GB / ${(LIMITS.storage.total.stored / (1024 * 1024 * 1024)).toFixed(2)} GB`);
+          if (totalStorageStored > LIMITS.storage.total.stored) {
+            limitExceeded = true;
+            reason = 'Total Storage capacity exceeded';
+            usage = `${(totalStorageStored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+            limit = `${(LIMITS.storage.total.stored / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+            resetType = 'monthly-utc';
+          }
+        }
       }
 
       if (limitExceeded) {
@@ -216,7 +207,8 @@ const App: React.FC = () => {
         });
       } else {
         setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
-        // Optional: clear shutdown flag if you want auto-recovery
+        // Clear shutdown flag to restore access
+        await setDoc(doc(db, 'config', 'shutdown'), { shutdown: false });
       }
     } catch (error) {
       console.error('Error checking limits:', error);
@@ -225,7 +217,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!ENABLE_LIMITS) {
+    if (ENABLE_LIMITS) {
+      checkLimits();
+    } else {
       setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
     }
   }, []);
