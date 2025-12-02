@@ -258,15 +258,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     return () => container.removeEventListener('scroll', handleScroll);
   }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm, searchRenderLimit, allSearchResults]);
 
-  // Sorting Handler
+  // Sorting Handler - Three states: asc -> desc -> normal (unsorted)
   const handleSort = (field: 'name' | 'quizTimes' | 'screened') => {
     if (sortField === field) {
-      // Toggle direction
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+      // Same field clicked - cycle through states
+      if (sortDirection === 'asc') {
+        // First click: asc -> desc
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        // Second click: desc -> normal (unsorted)
+        setSortField(null);
+        setSortDirection('asc'); // Reset for next time
+      }
     } else {
-      // New field
+      // Different field clicked - start with asc
       setSortField(field);
-      setSortDirection(field === 'name' ? 'asc' : 'desc'); // Default desc for numbers, asc for names
+      setSortDirection('asc');
     }
   };
 
