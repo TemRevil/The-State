@@ -1085,7 +1085,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
             <button onClick={() => setShowAdminLogin(false)} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
             <div className="admin-login-container">
               <div className="admin-login-image">
-                <img src="Assets/user.jpg" alt="Security" />
+                <img src="assets/user.jpg" alt="Security" />
               </div>
               <div className="admin-login-form">
                 <h2 className="text-3xl font-bold text-white mb-2">Management Access</h2>
