@@ -3,6 +3,7 @@ import './components/arabicFontDetector.js';
 import { LoginPage } from './components/LoginPage';
 import { MainPage } from './components/MainPage';
 import { AdminDashboard } from './components/AdminDashboard';
+import { UsageToast } from './components/UsageToast';
 import { auth, db, functions } from './firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { doc, setDoc } from 'firebase/firestore';
@@ -21,8 +22,8 @@ const LIMITS = {
     },
     monthly: {
       reads: 50000 * 30, // ~1.5M (Soft limit for safety)
-      writes: 20000 * 30, 
-      deletes: 20000 * 30 
+      writes: 20000 * 30,
+      deletes: 20000 * 30
     }
   },
   storage: {
@@ -32,7 +33,7 @@ const LIMITS = {
     },
     monthly: {
       bandwidth: 1024 * 1024 * 1024 * 30, // 30 GB
-      operations: 20000 * 30 
+      operations: 20000 * 30
     },
     total: {
       stored: 5 * 1024 * 1024 * 1024 // 5 GB
@@ -63,14 +64,14 @@ const App: React.FC = () => {
     let dstStart = new Date(year, 2, 1);
     while (dstStart.getDay() !== 0) dstStart.setDate(dstStart.getDate() + 1);
     dstStart.setDate(dstStart.getDate() + 7);
-    dstStart.setHours(2, 0, 0, 0); 
-    
+    dstStart.setHours(2, 0, 0, 0);
+
     let dstEnd = new Date(year, 10, 1);
     while (dstEnd.getDay() !== 0) dstEnd.setDate(dstEnd.getDate() + 1);
-    dstEnd.setHours(2, 0, 0, 0); 
-    
+    dstEnd.setHours(2, 0, 0, 0);
+
     const isDST = date >= dstStart && date < dstEnd;
-    return isDST ? -7 : -8; 
+    return isDST ? -7 : -8;
   };
 
   /**
@@ -117,7 +118,7 @@ const App: React.FC = () => {
     const hours = Math.floor((timeUntilReset % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeUntilReset % (1000 * 60)) / 1000);
-    
+
     if (days > 0) return `${days}d ${hours}h ${minutes}m ${seconds}s`;
     return `${hours}h ${minutes}m ${seconds}s`;
   };
@@ -164,7 +165,7 @@ const App: React.FC = () => {
       let resetType: 'daily-pacific' | 'daily-utc' | 'monthly-utc' = 'daily-pacific';
       let usage = '';
       let limit = '';
-  
+
       // Check MONTHLY Firestore Limits
       console.log(`Monthly Firestore reads: ${monthly.firestore.reads.total.toLocaleString()} / ${LIMITS.firestore.monthly.reads.toLocaleString()}`);
       if (monthly.firestore.reads.total > LIMITS.firestore.monthly.reads) {
@@ -323,6 +324,7 @@ const App: React.FC = () => {
 
   return (
     <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans" style={{ backdropFilter: 'blur(12px)' }}>
+      <UsageToast />
       <div className="bg-gradient-radial"></div>
       <div className="bg-orb-1"></div>
       <div className="bg-orb-2"></div>
@@ -332,14 +334,14 @@ const App: React.FC = () => {
             <LoginPage onLoginSuccess={handleLoginSuccess} />
           </div>
         ) : currentView === 'dashboard' ? (
-            <MainPage
-              onLogout={handleLogout}
-              onNavigateAdmin={() => setCurrentView('admin')}
-              isAdmin={isAdmin}
-            />
-          ) : (
-           <AdminDashboard onBack={() => setCurrentView('dashboard')} />
-         )}
+          <MainPage
+            onLogout={handleLogout}
+            onNavigateAdmin={() => setCurrentView('admin')}
+            isAdmin={isAdmin}
+          />
+        ) : (
+          <AdminDashboard onBack={() => setCurrentView('dashboard')} />
+        )}
       </div>
     </main>
   );

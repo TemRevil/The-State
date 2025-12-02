@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { storage, auth, db, functions } from '../firebaseConfig';
-import { ref, listAll, getMetadata, uploadBytes } from 'firebase/storage';
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
+import { ref, listAll, uploadBytes } from '../utils/firebaseMonitored';
+import { getMetadata } from 'firebase/storage';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot } from '../utils/firebaseMonitored';
+import { increment } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff, BookOpen, ChevronDown, Clock, CheckCircle, XCircle, ArrowLeft, ArrowRight } from 'lucide-react';
@@ -55,7 +57,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [timerActive, setTimerActive] = useState(false);
   const [quizFinished, setQuizFinished] = useState(false);
   const [loadingQuiz, setLoadingQuiz] = useState(false);
-  
+
   // Quiz Configuration
   const [quizTimerMinutes, setQuizTimerMinutes] = useState<number | null>(5); // null = no timer
   const [quizQuestionCount, setQuizQuestionCount] = useState<number>(10);
@@ -164,7 +166,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
           else {
             const num = localStorage.getItem('Number');
             if (!num) { setCanDownload(false); return; }
-            getDoc(doc(db, 'Numbers', num)).then(s => { if (s.exists()) setCanDownload(s.data()['PDF-Down'] === true); else setCanDownload(false); }).catch(() => {});
+            getDoc(doc(db, 'Numbers', num)).then(s => { if (s.exists()) setCanDownload(s.data()['PDF-Down'] === true); else setCanDownload(false); }).catch(() => { });
           }
         }
       });
@@ -269,11 +271,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Standard screenshot shortcuts
-      if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5'))) { 
-        e.preventDefault(); 
-        handleViolation(); 
+      if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5'))) {
+        e.preventDefault();
+        handleViolation();
       }
-      
+
       // Volume button detection for mobile devices
       if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
         volumeUpPressed = true;
@@ -284,7 +286,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
           handleViolation();
         }
       }
-      
+
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = true;
         volumeButtonPressTime = Date.now();
@@ -296,9 +298,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       }
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => { 
+    const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen') handleViolation();
-      
+
       // Reset volume button states
       if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
         volumeUpPressed = false;
@@ -307,7 +309,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
           handleViolation();
         }
       }
-      
+
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = false;
         // If volume button was held for a while, might be screenshot attempt
@@ -330,11 +332,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     };
 
     const handleCopy = (e: ClipboardEvent) => { e.preventDefault(); };
-    
+
     // Enhanced touch detection (three touch method + volume button simulation)
-    const handleTouchStart = (e: TouchEvent) => { 
-      if (e.touches.length >= 3) { 
-        handleViolation(); 
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 3) {
+        handleViolation();
       }
       // If touching while volume buttons might be pressed (heuristic)
       if (e.touches.length >= 2 && (volumeUpPressed || volumeDownPressed)) {
@@ -342,11 +344,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown, true); 
-    window.addEventListener('keyup', handleKeyUp, true); 
-    window.addEventListener('copy', handleCopy, true); 
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('copy', handleCopy, true);
     window.addEventListener('touchstart', handleTouchStart, true);
-    
+
     // Try to capture media keys
     try {
       window.addEventListener('keydown', handleMediaKey, true);
@@ -354,14 +356,14 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       // Some browsers don't support media key events
     }
 
-    return () => { 
-      window.removeEventListener('keydown', handleKeyDown, true); 
-      window.removeEventListener('keyup', handleKeyUp, true); 
-      window.removeEventListener('copy', handleCopy, true); 
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('copy', handleCopy, true);
       window.removeEventListener('touchstart', handleTouchStart, true);
       try {
         window.removeEventListener('keydown', handleMediaKey, true);
-      } catch (e) {}
+      } catch (e) { }
     };
   }, [selectedPdf, violation]);
 
@@ -484,7 +486,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       const shuffledOthers = otherChoices.sort(() => Math.random() - 0.5);
       const selectedOthers = shuffledOthers.slice(0, quizChoicesCount - 1);
       const newChoices = [correctAnswer, ...selectedOthers].sort(() => Math.random() - 0.5);
-      
+
       return {
         ...q,
         choices: newChoices
@@ -494,7 +496,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     setCurrentQuizData(processedQuestions);
     setUserAnswers(new Array(processedQuestions.length).fill(null));
     setCurrentQuestionIndex(0);
-    
+
     // Set timer based on selection
     if (quizTimerMinutes === null) {
       setQuizTimer(0);
@@ -503,7 +505,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       setQuizTimer(quizTimerMinutes * 60);
       setTimerActive(true);
     }
-    
+
     setQuizStarted(true);
     setQuizFinished(false);
 
@@ -529,7 +531,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     if (direction > 0 && userAnswers[currentQuestionIndex] === null) {
       return;
     }
-    
+
     const newIndex = currentQuestionIndex + direction;
     if (newIndex >= 0 && newIndex < currentQuizData.length) {
       setCurrentQuestionIndex(newIndex);
@@ -580,7 +582,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
   return (
     <div className="flex flex-row h-screen w-full select-none overflow-hidden bg-app-base">
-      
+
       {/* SIDEBAR */}
       <aside className={`sidebar z-20 shadow-lg ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header justify-between px-6">
@@ -593,28 +595,28 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
         {/* Navigation Items */}
         <div className="flex-1 overflow-auto px-8 py-8 custom-scrollbar">
           <div className="flex flex-col gap-2 p-4">
-            
+
             {/* WEEKS DROPDOWN */}
             <div className="flex flex-col">
-              <button 
+              <button
                 onClick={() => {
                   const newShow = !showWeeksDropdown;
                   setShowWeeksDropdown(newShow);
-                  if (newShow) setActiveSection('weeks'); 
-                }} 
+                  if (newShow) setActiveSection('weeks');
+                }}
                 className={`nav-btn w-full justify-between group ${activeSection === 'weeks' ? 'active' : 'text-muted hover:text-white'}`}
               >
                 <div className="flex items-center gap-3">
-                  <FolderOpen size={18} className={activeSection === 'weeks' ? 'text-white' : 'text-muted group-hover:text-white'} /> 
+                  <FolderOpen size={18} className={activeSection === 'weeks' ? 'text-white' : 'text-muted group-hover:text-white'} />
                   <span className="font-medium">Weeks</span>
                 </div>
-                <ChevronDown 
-                  size={16} 
-                  className={`transition-transform duration-300 ${showWeeksDropdown ? 'rotate-180' : ''}`} 
+                <ChevronDown
+                  size={16}
+                  className={`transition-transform duration-300 ${showWeeksDropdown ? 'rotate-180' : ''}`}
                 />
               </button>
-              
-              <div 
+
+              <div
                 className="overflow-hidden transition-all duration-300 ease-in-out"
                 style={{
                   maxHeight: showWeeksDropdown ? `${weeks.length * 40 + 20}px` : '0px',
@@ -626,9 +628,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     <div className="flex justify-center py-2"><Loader2 className="animate-spin text-muted" size={14} /></div>
                   ) : (
                     weeks.map((week) => (
-                      <button 
-                        key={week} 
-                        onClick={() => { setActiveWeek(week); setActiveSection('weeks'); backToQuizTypes(); }} 
+                      <button
+                        key={week}
+                        onClick={() => { setActiveWeek(week); setActiveSection('weeks'); backToQuizTypes(); }}
                         className={`nav-btn h-9 text-sm w-full justify-start pl-3 ${activeWeek === week && activeSection === 'weeks' ? 'bg-primary/20 text-primary border border-primary/20' : 'text-muted hover:text-white hover:bg-white/5 border border-transparent'}`}
                       >
                         <span className="font-medium truncate">{week}</span>
@@ -640,15 +642,15 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
             </div>
 
             {/* QUIZZES BUTTON */}
-            <button 
+            <button
               onClick={() => {
                 setActiveSection('quizzes');
                 setShowWeeksDropdown(false);
                 backToQuizTypes();
-              }} 
+              }}
               className={`nav-btn w-full justify-start gap-3 ${activeSection === 'quizzes' ? 'active' : 'text-muted hover:text-white'}`}
             >
-              <BookOpen size={18} /> 
+              <BookOpen size={18} />
               <span className="font-medium">Quizzes</span>
             </button>
           </div>
@@ -670,7 +672,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       </aside>
 
       {sidebarOpen && <div className="mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
-      
+
       <main className="main-content">
         <header className="content-header">
           <div className="flex items-center gap-3">
@@ -724,8 +726,8 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
             ) : (
               <div className="flex flex-col gap-4 max-w-md quiz-container">
                 {lectureTypes.map((type) => (
-                  <button 
-                    key={type} 
+                  <button
+                    key={type}
                     onClick={() => loadQuizMaps(type)}
                     className="quiz-btn"
                   >
@@ -744,14 +746,14 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
               </div>
             ) : (
               <div className="max-w-2xl mx-auto p-6">
-                <button 
+                <button
                   onClick={backToQuizTypes}
                   className="back-link-btn mb-6"
                 >
                   <ArrowLeft size={16} />
                   <span>Back to Quiz Types</span>
                 </button>
-                
+
                 <div className="bg-surface border border-white/10 rounded-xl p-6 mb-6">
                   <h3 className="text-xl font-bold text-white mb-2">Select Sections</h3>
                   <p className="text-sm text-muted mb-4">
@@ -761,11 +763,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     {quizMaps.map((map, index) => {
                       const selected = selectedMaps.has(index);
                       return (
-                        <label 
+                        <label
                           key={index}
                           className={`quiz-section-card cursor-pointer transition-all ${selected ? 'selected' : ''}`}
                         >
-                          <input 
+                          <input
                             type="checkbox"
                             checked={selected}
                             onChange={() => toggleMapSelection(index)}
@@ -788,11 +790,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                       );
                     })}
                   </div>
-                  
+
                   {/* Quiz Configuration */}
                   <div className="settings-section">
                     <h4 className="settings-title">Quiz Settings</h4>
-                    
+
                     {/* Timer Selection */}
                     <div className="form-field">
                       <label className="form-label">
@@ -819,7 +821,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                         <span>15 min</span>
                       </div>
                     </div>
-                    
+
                     {/* Question Count */}
                     <div className="form-field">
                       <label className="form-label">
@@ -838,7 +840,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                         <span>15</span>
                       </div>
                     </div>
-                    
+
                     {/* Choices Count */}
                     <div className="form-field">
                       <label className="form-label">
@@ -858,8 +860,8 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                       </div>
                     </div>
                   </div>
-                  
-                  <button 
+
+                  <button
                     onClick={startQuizSession}
                     disabled={selectedMaps.size === 0}
                     className="w-full btn btn-primary h-12 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
@@ -888,9 +890,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     const userAns = userAnswers[i];
                     const isCorrect = userAns === q.correct_answer;
                     const dir = getTextDirection(q.question);
-                    
+
                     return (
-                      <div 
+                      <div
                         key={i}
                         className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}
                       >
@@ -904,19 +906,19 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                               <XCircle size={24} className="quiz-result-icon wrong" />
                             </div>
                           )}
-                          <p 
+                          <p
                             className="quiz-result-question"
                             style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
                           >
                             {i + 1}. {q.question}
                           </p>
                         </div>
-                        
+
                         <div className="ml-11 space-y-3">
                           {userAns && (
                             <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
                               <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
-                              <span 
+                              <span
                                 className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`}
                                 style={{ direction: getTextDirection(userAns) }}
                               >
@@ -932,7 +934,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                           {!isCorrect && (
                             <div className="quiz-answer-box correct">
                               <span className="quiz-answer-label correct">Correct answer: </span>
-                              <span 
+                              <span
                                 className="quiz-answer-text correct"
                                 style={{ direction: getTextDirection(q.correct_answer) }}
                               >
@@ -943,7 +945,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                           {q.explanation && (
                             <div className="quiz-explanation-box">
                               <span className="quiz-explanation-label">Explanation: </span>
-                              <span 
+                              <span
                                 className="quiz-explanation-text"
                                 style={{ direction: getTextDirection(q.explanation) }}
                               >
@@ -958,13 +960,13 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 </div>
 
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={resetQuiz}
                     className="flex-1 btn btn-primary h-12"
                   >
                     Try Again
                   </button>
-                  <button 
+                  <button
                     onClick={backToQuizTypes}
                     className="flex-1 btn bg-white/10 hover:bg-white/20 border border-white/10 h-12"
                   >
@@ -983,11 +985,10 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     <span>/</span>
                     <span>{currentQuizData.length}</span>
                   </div>
-                  
+
                   {timerActive && (
-                    <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-                      quizTimer < 60 ? 'bg-red-500/20 text-red-400' : 'bg-primary/20 text-primary'
-                    }`}>
+                    <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${quizTimer < 60 ? 'bg-red-500/20 text-red-400' : 'bg-primary/20 text-primary'
+                      }`}>
                       <Clock size={18} />
                       <span className="font-mono font-bold">{formatTime(quizTimer)}</span>
                     </div>
@@ -995,9 +996,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 </div>
 
                 <div className="mb-8">
-                  <p 
+                  <p
                     className="text-xl font-medium text-white leading-relaxed"
-                    style={{ 
+                    style={{
                       direction: getTextDirection(currentQuizData[currentQuestionIndex]?.question || ''),
                       textAlign: getTextDirection(currentQuizData[currentQuestionIndex]?.question || '') === 'rtl' ? 'right' : 'left'
                     }}
@@ -1010,13 +1011,13 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   {currentQuizData[currentQuestionIndex]?.choices.map((choice, idx) => {
                     const isSelected = userAnswers[currentQuestionIndex] === choice;
                     const dir = getTextDirection(choice);
-                    
+
                     return (
                       <button
                         key={idx}
                         onClick={() => selectAnswer(choice)}
                         className={`quiz-choice${isSelected ? ' selected' : ''}`}
-                        style={{ 
+                        style={{
                           direction: dir,
                           textAlign: dir === 'rtl' ? 'right' : 'left'
                         }}
@@ -1028,7 +1029,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 </div>
 
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={() => navigateQuestion(-1)}
                     disabled={currentQuestionIndex === 0}
                     className="btn bg-white/10 hover:bg-white/20 border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1036,8 +1037,8 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     <ArrowLeft size={18} />
                     Previous
                   </button>
-                  
-                  <button 
+
+                  <button
                     onClick={() => navigateQuestion(1)}
                     disabled={userAnswers[currentQuestionIndex] === null}
                     className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1046,7 +1047,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                     {currentQuestionIndex !== currentQuizData.length - 1 && <ArrowRight size={18} />}
                   </button>
                 </div>
-                
+
                 {userAnswers[currentQuestionIndex] === null && (
                   <p className="text-sm text-muted text-center mt-2">
                     Please select an answer to continue
@@ -1059,7 +1060,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       </main>
 
       <PDFViewer pdf={selectedPdf} onClose={() => { setSelectedPdf(null); setViolation(false); }} violation={violation} onViolation={() => setViolation(true)} canDownload={canDownload} />
-      
+
       {isFocusLost && (
         <div className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200000 }}>
           <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-6 shadow-glow"> <EyeOff size={48} className="text-muted" /> </div>
@@ -1068,7 +1069,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
           <button onClick={() => setIsFocusLost(false)} className="btn btn-primary px-8 py-3 h-auto text-lg rounded-full">Resume Session</button>
         </div>
       )}
-      
+
       {isPermanentlyBlocked && (
         <div className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" style={{ backgroundColor: 'rgba(127, 29, 29, 0.5)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200001 }}>
           <div className="w-24 h-24 rounded-full bg-error/20 border border-error/30 flex items-center justify-center mb-6 shadow-glow-error"> <ShieldAlert size={48} className="text-error" /> </div>
@@ -1077,7 +1078,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
           <button onClick={async () => { await signOut(auth); onLogout(); }} className="btn btn-danger px-8 py-3 h-auto text-lg rounded-full flex items-center gap-2"> <LogOut size={20} /> Acknowledge & Sign Out </button>
         </div>
       )}
-      
+
       {showAdminLogin && (
         <div className="modal-overlay animate-fade-in">
           <div className="admin-login-modal modal-content p-8 relative">
@@ -1094,23 +1095,23 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 <div className="flex flex-col gap-4">
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
-                    <input 
-                      ref={passwordInputRef} 
-                      type="password" 
-                      value={adminPassword} 
-                      onChange={(e) => setAdminPassword(e.target.value)} 
+                    <input
+                      ref={passwordInputRef}
+                      type="password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleAdminLoginSubmit()}
-                      placeholder="Security Code" 
-                      className="login-input pl-12 w-full" 
+                      placeholder="Security Code"
+                      className="login-input pl-12 w-full"
                     />
                   </div>
                   {adminError && <div className="text-xs text-error py-2 px-4 bg-red-500/10 rounded-lg border border-red-500/20 text-center">{adminError}</div>}
-                  <button 
-                    onClick={handleAdminLoginSubmit} 
-                    disabled={adminLoading} 
+                  <button
+                    onClick={handleAdminLoginSubmit}
+                    disabled={adminLoading}
                     className="btn btn-primary w-full"
-                  > 
-                    {adminLoading ? <Loader2 size={20} className="animate-spin" /> : 'Authenticate'} 
+                  >
+                    {adminLoading ? <Loader2 size={20} className="animate-spin" /> : 'Authenticate'}
                   </button>
                 </div>
               </div>

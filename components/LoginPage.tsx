@@ -3,14 +3,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Loader2, Lock, ChevronRight, CheckCircle2, ShieldAlert, Ban, KeyRound, UserCheck, Copy, Check, UserPlus } from 'lucide-react';
 import { auth, db, firebaseConfig } from '../firebaseConfig';
 import { signInWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from '../utils/firebaseMonitored';
 
-const decodeNum = (k: string) => { 
-  let r = ""; 
+const decodeNum = (k: string) => {
+  let r = "";
   for (let i = 10; i < k.length && r.length < 11; i += 2) {
-    if (/\d/.test(k[i])) r += k[i]; 
+    if (/\d/.test(k[i])) r += k[i];
   }
-  return r; 
+  return r;
 };
 
 const genCode = () => Array.from({ length: 5 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
@@ -29,7 +29,7 @@ const getDeviceName = async () => {
         localStorage.setItem("DeviceName", i.model);
         return i.model;
       }
-    } catch {}
+    } catch { }
   }
   const ua = navigator.userAgent;
   const m = ua.match(/Android\s[\d.]+;\s([^)]+)/i);
@@ -57,7 +57,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [isBlocked, setIsBlocked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [blockReason, setBlockReason] = useState('');
-  
+
   const inputRef = useRef<HTMLInputElement>(null);
   const apiKeyRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -128,11 +128,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (blockedDocSnap.exists()) {
         const reason = blockedDocSnap.data().Reason || 'No reason provided.';
         setBlockReason(reason);
-        setIsBlocked(true); 
+        setIsBlocked(true);
         localStorage.setItem('lastBlockedNumber', phoneValue);
         localStorage.setItem('lastBlockReason', reason);
-        setError('ACCESS DENIED: Identity flagged.'); 
-        setIsLoading(false); 
+        setError('ACCESS DENIED: Identity flagged.');
+        setIsLoading(false);
         return;
       }
 
@@ -141,10 +141,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (snitchesSnap.docs.some(d => d.data()["The Login Number"] === phoneValue)) {
         const reason = 'Snitching attempt';
         setBlockReason(reason);
-        setIsBlocked(true); 
-        localStorage.setItem('lastBlockedNumber', phoneValue); 
-        localStorage.setItem('lastBlockReason', reason); 
-        setError('ACCESS DENIED: Identity flagged.'); 
+        setIsBlocked(true);
+        localStorage.setItem('lastBlockedNumber', phoneValue);
+        localStorage.setItem('lastBlockReason', reason);
+        setError('ACCESS DENIED: Identity flagged.');
         setIsLoading(false); return;
       }
 
@@ -170,17 +170,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       const dec = decodeNum(apiKeyValue);
       if (dec !== phoneValue) {
         try {
-           const sRef = collection(db, "Snitches");
-           const snap = await getDocs(sRef);
-           if (!snap.docs.some(d => d.data()["The Login Number"] === phoneValue)) {
-              await setDoc(doc(sRef, `Match ${snap.size + 1}`), {
-                 "The Login Number": phoneValue, "The Snitch": dec, "Snitched Date": fmtDate(), "Snitched Time": fmtTime()
-              });
-              await setDoc(doc(db, "Blocked", phoneValue), {
-                 "Blocked Date": fmtDate(), "Blocked Time": fmtTime(), "Reason": "tried to snitch"
-              });
-           }
-        } catch {}
+          const sRef = collection(db, "Snitches");
+          const snap = await getDocs(sRef);
+          if (!snap.docs.some(d => d.data()["The Login Number"] === phoneValue)) {
+            await setDoc(doc(sRef, `Match ${snap.size + 1}`), {
+              "The Login Number": phoneValue, "The Snitch": dec, "Snitched Date": fmtDate(), "Snitched Time": fmtTime()
+            });
+            await setDoc(doc(db, "Blocked", phoneValue), {
+              "Blocked Date": fmtDate(), "Blocked Time": fmtTime(), "Reason": "tried to snitch"
+            });
+          }
+        } catch { }
         localStorage.setItem("Number", phoneValue);
         localStorage.setItem('lastBlockedNumber', phoneValue);
         localStorage.setItem('lastBlockReason', 'tried to snitch');
@@ -191,26 +191,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       localStorage.setItem("Number", phoneValue); localStorage.setItem("Code", code);
       const userDoc = await getDoc(doc(db, "Numbers", phoneValue));
       if (userDoc.exists()) {
-         const d = userDoc.data();
-         const devs = d.Devices || {};
-         const map = devs["Devices Name"] || {};
-         const vals = Object.values(map);
-         const arch = devs.Archived || {};
-         arch[Object.keys(arch).length + 1] = { Code: code, Date: fmtDate(), Time: fmtTime() };
-         if (!vals.includes(devName as any)) map[Object.keys(map).length + 1] = devName;
-         await updateDoc(doc(db, "Numbers", phoneValue), { Devices: { "Devices Name": map, Archived: arch } });
-         
-         if (d.Name && d.Name !== "Unknown") {
-            localStorage.setItem("Name", d.Name); onLoginSuccess();
-         } else {
-            setStep(3); setTimeout(() => nameRef.current?.focus(), 300);
-         }
+        const d = userDoc.data();
+        const devs = d.Devices || {};
+        const map = devs["Devices Name"] || {};
+        const vals = Object.values(map);
+        const arch = devs.Archived || {};
+        arch[Object.keys(arch).length + 1] = { Code: code, Date: fmtDate(), Time: fmtTime() };
+        if (!vals.includes(devName as any)) map[Object.keys(map).length + 1] = devName;
+        await updateDoc(doc(db, "Numbers", phoneValue), { Devices: { "Devices Name": map, Archived: arch } });
+
+        if (d.Name && d.Name !== "Unknown") {
+          localStorage.setItem("Name", d.Name); onLoginSuccess();
+        } else {
+          setStep(3); setTimeout(() => nameRef.current?.focus(), 300);
+        }
       } else {
-         onLoginSuccess();
+        onLoginSuccess();
       }
     } catch (err: any) {
-       console.error(err);
-       setError("Authentication Failed.");
+      console.error(err);
+      setError("Authentication Failed.");
     } finally { setIsLoading(false); }
   };
 
@@ -228,22 +228,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   return (
     <div className="login-container relative">
       <div className={`login-card ${isBlocked ? 'blocked' : ''}`}>
-        
+
         {/* Status Indicator */}
         <div className="absolute top-6 right-6 flex items-center gap-2">
           <div className={`rounded-full ${isAuthenticated ? 'bg-success' : 'bg-warning'}`} style={{ width: '8px', height: '8px', boxShadow: isAuthenticated ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none' }}></div>
         </div>
 
         <div className="mb-8 mt-2 flex flex-col items-center">
-           <div className={`rounded-full flex items-center justify-center mb-6 transition-colors ${isBlocked ? 'text-error bg-error/10' : 'text-white bg-surface'}`} style={{ width: '72px', height: '72px', border: `1px solid ${isBlocked ? 'var(--color-error-translucent)' : 'var(--color-border)'}` }}>
-             {isBlocked ? <Ban size={32} /> : (step === 3 ? <UserPlus size={32} /> : <Lock size={32} />)}
-           </div>
-           <h1 className="text-3xl font-bold text-white tracking-tight">
-             {isBlocked ? 'Restricted' : (step === 3 ? 'Setup' : 'The State')}
-           </h1>
-           <p className={`text-base text-center mt-2 font-medium ${isBlocked ? 'text-error' : 'text-muted'}`}>
-             {isBlocked ? 'This identity has been flagged.' : (step === 1 ? 'Enter identity number' : (step === 3 ? 'Create profile' : 'Confirm security token'))}
-           </p>
+          <div className={`rounded-full flex items-center justify-center mb-6 transition-colors ${isBlocked ? 'text-error bg-error/10' : 'text-white bg-surface'}`} style={{ width: '72px', height: '72px', border: `1px solid ${isBlocked ? 'var(--color-error-translucent)' : 'var(--color-border)'}` }}>
+            {isBlocked ? <Ban size={32} /> : (step === 3 ? <UserPlus size={32} /> : <Lock size={32} />)}
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">
+            {isBlocked ? 'Restricted' : (step === 3 ? 'Setup' : 'The State')}
+          </h1>
+          <p className={`text-base text-center mt-2 font-medium ${isBlocked ? 'text-error' : 'text-muted'}`}>
+            {isBlocked ? 'This identity has been flagged.' : (step === 1 ? 'Enter identity number' : (step === 3 ? 'Create profile' : 'Confirm security token'))}
+          </p>
         </div>
 
         <form onSubmit={step === 1 ? handleVerifyStep : (step === 2 ? handleFinalLogin : handleNameUpdate)} className="flex flex-col gap-4 w-full">
@@ -261,43 +261,43 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 />
                 {step === 2 && (
                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <CheckCircle2 size={20} className="text-success" />
+                    <CheckCircle2 size={20} className="text-success" />
                   </div>
                 )}
               </div>
             </div>
             {step === 2 && (
-                <div className="animate-slide-up mt-4">
-                  <div className="relative">
-                    <input
-                      ref={apiKeyRef}
-                      type="text"
-                      value={apiKeyValue}
-                      onChange={(e) => canEditKey && setApiKeyValue(e.target.value)}
-                      readOnly={!canEditKey} 
-                      placeholder={canEditKey ? "Paste security token..." : "Token missing..."}
-                      className={`login-input pl-4 pr-12 text-xs font-mono break-all ${!canEditKey ? 'text-success cursor-default opacity-90' : ''}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { if(apiKeyValue) { navigator.clipboard.writeText(apiKeyValue); setCopied(true); setTimeout(() => setCopied(false), 2000); }}}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 btn-icon"
-                    >
-                      {copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}
-                    </button>
-                  </div>
+              <div className="animate-slide-up mt-4">
+                <div className="relative">
+                  <input
+                    ref={apiKeyRef}
+                    type="text"
+                    value={apiKeyValue}
+                    onChange={(e) => canEditKey && setApiKeyValue(e.target.value)}
+                    readOnly={!canEditKey}
+                    placeholder={canEditKey ? "Paste security token..." : "Token missing..."}
+                    className={`login-input pl-4 pr-12 text-xs font-mono break-all ${!canEditKey ? 'text-success cursor-default opacity-90' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { if (apiKeyValue) { navigator.clipboard.writeText(apiKeyValue); setCopied(true); setTimeout(() => setCopied(false), 2000); } }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 btn-icon"
+                  >
+                    {copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}
+                  </button>
                 </div>
+              </div>
             )}
           </div>
           <div className={`${step === 3 ? 'block' : 'hidden'} animate-slide-up`}>
-              <input
-                ref={nameRef}
-                type="text"
-                value={nameValue}
-                onChange={(e) => setNameValue(e.target.value)}
-                placeholder="Full Name"
-                className="login-input text-center text-lg"
-              />
+            <input
+              ref={nameRef}
+              type="text"
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value)}
+              placeholder="Full Name"
+              className="login-input text-center text-lg"
+            />
           </div>
           <div style={{ minHeight: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {error && (
@@ -322,7 +322,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       {/* BLOCKED WALL OVERLAY */}
       {isBlocked && (
-        <div 
+        <div
           className="absolute inset-0 animate-fade-in flex items-center justify-center p-4 z-20"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
         >

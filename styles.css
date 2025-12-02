@@ -936,3 +936,116 @@ button, input { font-family: inherit; font-size: inherit; }
     font-weight: 400;
     color: var(--color-text-main);
 }
+
+/* --- USAGE TOAST --- */
+.usage-toast {
+    position: fixed;
+    z-index: 1000;
+}
+
+.usage-toast-container {
+    background-color: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+    padding: var(--space-md);
+    user-select: none;
+}
+
+.usage-toast-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.usage-toast-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--color-primary);
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.usage-toast-close {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: color 0.2s;
+    padding: 0;
+}
+
+.usage-toast-close:hover {
+    color: var(--color-text-main);
+}
+
+.usage-toast-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.usage-toast-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    background-color: rgba(255, 255, 255, 0.05);
+    transition: all 0.3s;
+}
+
+.usage-toast-stat-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.usage-toast-stat-value {
+    font-size: 1.25rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    transition: all 0.3s;
+}
+
+.usage-toast-stat-value-flash {
+    transform: scale(1.1);
+}
+
+.usage-toast-stat-flash-blue {
+    background-color: rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 1);
+}
+
+.usage-toast-stat-flash-amber {
+    background-color: rgba(245, 158, 11, 0.2);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 1);
+}
+
+.usage-toast-stat-flash-red {
+    background-color: rgba(239, 68, 68, 0.2);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 1);
+}
+
+.usage-toast-stat-flash-emerald {
+    background-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 1);
+}
+
+.usage-toast-dragging {
+    user-select: none;
+    pointer-events: none;
+    opacity: 0.8;
+}
