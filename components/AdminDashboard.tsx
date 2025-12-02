@@ -3,7 +3,7 @@ import { trafficWatcher } from '../utils/firebaseTraffic';
 import { db, storage, auth, functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from '../utils/firebaseMonitored';
-import { query, limit, startAfter, orderBy, getCountFromServer } from 'firebase/firestore';
+import { query, limit, startAfter, orderBy, getCountFromServer, where, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from '../utils/firebaseMonitored';
 import { signOut } from 'firebase/auth';
 import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database, ArrowUp, ArrowDown, Activity } from 'lucide-react';
@@ -30,7 +30,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
   const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // --- NUMBERS DATA STATE ---
   const [numbers, setNumbers] = useState<NumberData[]>([]);
+  // Store all search results here to paginate client-side when searching
+  const [allSearchResults, setAllSearchResults] = useState<NumberData[]>([]); 
+  
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
   const [snitches, setSnitches] = useState<SnitchData[]>([]);
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -79,68 +84,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [visibleAttempts, setVisibleAttempts] = useState(10);
   const modalScrollRef = useRef<HTMLDivElement>(null);
 
-  // Pagination states
-  const [numbersPageSize] = useState(20); // Load 20 at a time
-  const [numbersLastDoc, setNumbersLastDoc] = useState<any>(null);
+  // --- PAGINATION & SORTING STATE ---
+  const [numbersPageSize] = useState(20);
+  const [numbersLastDoc, setNumbersLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [numbersHasMore, setNumbersHasMore] = useState(true);
   const [numbersLoadingMore, setNumbersLoadingMore] = useState(false);
+  const [searchRenderLimit, setSearchRenderLimit] = useState(20); // Virtual pagination limit for search results
 
   // Sorting state
   const [sortField, setSortField] = useState<'name' | 'quizTimes' | 'screened' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-
-  // Load numbers with pagination or all for search
-  const loadNumbers = async (loadMore = false) => {
-     if (loadMore && (!numbersHasMore || numbersLoadingMore)) return;
-
-     setNumbersLoadingMore(true);
-     try {
-       let q;
-
-       if (debouncedSearchTerm) {
-         // When searching, load all numbers for client-side filtering
-         q = query(collection(db, "Numbers"), orderBy('__name__'));
-       } else {
-         // When not searching, use pagination
-         q = query(collection(db, "Numbers"), orderBy('__name__'), limit(numbersPageSize));
-         if (loadMore && numbersLastDoc) {
-           q = query(collection(db, "Numbers"), orderBy('__name__'), startAfter(numbersLastDoc), limit(numbersPageSize));
-         }
-       }
-
-       const snapshot = await getDocs(q);
-       const newNumbers = snapshot.docs.map(d => ({
-         id: d.id,
-         number: d.id,
-         name: d.data().Name,
-         quizTimes: d.data()["Quizi-Times"] || 0,
-         quizEnabled: d.data()["Quiz-Enabled"] ?? true,
-         pdfDown: d.data()["PDF-Down"] ?? true,
-         deviceCount: 0,
-         screenedCount: d.data()["Screened"] || 0,
-         devices: d.data().Devices
-       }));
-
-       if (debouncedSearchTerm) {
-         // For search, replace all numbers
-         setNumbers(newNumbers);
-         setNumbersHasMore(false); // No more to load when searching
-       } else {
-         // For pagination
-         if (loadMore) {
-           setNumbers(prev => [...prev, ...newNumbers]);
-         } else {
-           setNumbers(newNumbers);
-         }
-         setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-         setNumbersHasMore(snapshot.docs.length === numbersPageSize);
-       }
-     } catch (error) {
-       console.error('Error loading numbers:', error);
-     } finally {
-       setNumbersLoadingMore(false);
-     }
-   };
 
   // User Inputs
   const [newNumber, setNewNumber] = useState('');
@@ -150,138 +103,187 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [globalQuiz, setGlobalQuiz] = useState(true);
   const [globalPdf, setGlobalPdf] = useState(true);
 
-  // ------------------------------------------------------------------
-  //  CHART TOOLTIP: Intelligent Date Formatting
-  // ------------------------------------------------------------------
-  const CustomTooltip = ({ active, payload, label, limit }: any) => {
-    if (active && payload && payload.length && label) {
-      const date = new Date(label as number);
-      let dateStr = '';
+  // --- NUMBERS LOADING LOGIC ---
 
-      // If viewing generic 24h or Quota -> Show TIME
-      if (usageViewMode === '24h' || usageViewMode === 'quota') {
-        dateStr = date.toLocaleString('en-GB', {
-          timeZone: 'America/Los_Angeles',
-          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-        }) + ' (PT)';
+  // Helper to map doc to data
+  const mapNumberDoc = (d: any): NumberData => ({
+    id: d.id,
+    number: d.id,
+    name: d.data().Name,
+    quizTimes: d.data()["Quizi-Times"] || 0,
+    quizEnabled: d.data()["Quiz-Enabled"] ?? true,
+    pdfDown: d.data()["PDF-Down"] ?? true,
+    deviceCount: 0,
+    screenedCount: d.data()["Screened"] || 0,
+    devices: d.data().Devices
+  });
+
+  // 1. Load Numbers (Handles both Initial Load, Scrolling, and Sorting)
+  const loadNumbers = async (isLoadMore = false) => {
+    // Prevent duplicate loads
+    if (isLoadMore && numbersLoadingMore) return;
+    if (isLoadMore && !numbersHasMore) return;
+
+    setNumbersLoadingMore(true);
+
+    try {
+      if (debouncedSearchTerm) {
+        // --- SEARCH MODE ---
+        // When searching, we want to "Search in ALL numbers", then sort, then paginate locally.
+        // Server-side filtering for 'contains' is not possible efficiently.
+        // We fetch a large batch (effectively all for typical use cases, e.g. 2000) and filter/sort in memory.
+        
+        if (!isLoadMore) {
+          // New Search: Fetch fresh data
+          // Note: In a huge app, you'd use Algolia. Here we fetch the collection to filter locally.
+          const q = query(collection(db, "Numbers"), limit(2000)); 
+          const snapshot = await getDocs(q);
+          const rawData = snapshot.docs.map(mapNumberDoc);
+
+          // Filter
+          const term = debouncedSearchTerm.toLowerCase();
+          const filtered = rawData.filter(n => 
+             n.number.includes(term) || (n.name && n.name.toLowerCase().includes(term))
+          );
+
+          // Sort
+          const sorted = filtered.sort((a, b) => {
+             if (!sortField) return 0; // Default order
+             if (sortField === 'name') {
+               const nameA = (a.name || '').toLowerCase();
+               const nameB = (b.name || '').toLowerCase();
+               return sortDirection === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+             }
+             if (sortField === 'quizTimes') return sortDirection === 'asc' ? a.quizTimes - b.quizTimes : b.quizTimes - a.quizTimes;
+             if (sortField === 'screened') return sortDirection === 'asc' ? a.screenedCount - b.screenedCount : b.screenedCount - a.screenedCount;
+             return 0;
+          });
+
+          setAllSearchResults(sorted);
+          setSearchRenderLimit(20); // Reset visible limit
+          setNumbers(sorted.slice(0, 20)); // Show first 20
+          setNumbersHasMore(sorted.length > 20);
+        } else {
+          // Scrolling in Search Mode: Just show more from memory
+          const nextLimit = searchRenderLimit + 20;
+          setSearchRenderLimit(nextLimit);
+          setNumbers(allSearchResults.slice(0, nextLimit));
+          setNumbersHasMore(allSearchResults.length > nextLimit);
+        }
+
       } else {
-        // If viewing days/months -> Show DATE
-        dateStr = date.toLocaleString('en-GB', {
-          timeZone: 'America/Los_Angeles',
-          month: 'long', day: 'numeric'
-        });
+        // --- DEFAULT MODE (Server-Side Pagination & Sorting) ---
+        // This pulls 20 items from Firestore at a time, strictly following the sort order of the collection.
+        
+        let q;
+        const collectionRef = collection(db, "Numbers");
+        
+        // Determine Firestore Sort Field
+        let firestoreOrderBy: any = orderBy('__name__'); // Default to ID
+        if (sortField === 'name') firestoreOrderBy = orderBy('Name', sortDirection);
+        else if (sortField === 'quizTimes') firestoreOrderBy = orderBy('Quizi-Times', sortDirection);
+        else if (sortField === 'screened') firestoreOrderBy = orderBy('Screened', sortDirection);
+        else if (!sortField) firestoreOrderBy = orderBy('__name__', sortDirection); // ID Sort
+
+        if (!isLoadMore) {
+           // Initial Fetch
+           q = query(collectionRef, firestoreOrderBy, limit(numbersPageSize));
+        } else if (numbersLastDoc) {
+           // Next Page
+           q = query(collectionRef, firestoreOrderBy, startAfter(numbersLastDoc), limit(numbersPageSize));
+        } else {
+           setNumbersLoadingMore(false);
+           return; 
+        }
+
+        const snapshot = await getDocs(q);
+        const newNumbers = snapshot.docs.map(mapNumberDoc);
+
+        if (!isLoadMore) {
+          setNumbers(newNumbers);
+        } else {
+          setNumbers(prev => [...prev, ...newNumbers]);
+        }
+
+        // Update cursor
+        if (snapshot.docs.length > 0) {
+           setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+        }
+        setNumbersHasMore(snapshot.docs.length === numbersPageSize);
       }
-
-      const value = Number(payload[0].value);
-      const limitVal = limit || 0;
-      const pct = limitVal > 0 ? (value / limitVal) * 100 : 0;
-
-      return (
-        <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.9)', border: '1px solid rgba(255,255,255,0.1)' }}>
-          <p className="text-xs font-mono text-muted uppercase tracking-wider mb-1">{dateStr}</p>
-          <p style={{ color: payload[0].color, fontSize: '0.875rem', fontWeight: 'bold' }}>
-            {payload[0].name}: {value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </p>
-          {limit && (
-            <div className="mt-2 pt-2 border-t border-white/10">
-              <div className="flex justify-between text-xs text-muted gap-4">
-                <span>Limit:</span> <span>{limitVal.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-xs font-bold gap-4" style={{ color: value > limitVal ? '#ef476f' : '#06d6a0' }}>
-                <span>Used:</span> <span>{pct.toFixed(1)}%</span>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-    return null;
-  };
-
-  // ------------------------------------------------------------------
-  //  CHART AXIS: Dual Time Zones (PT + Cairo) or Date
-  // ------------------------------------------------------------------
-  const CustomAxisTick = ({ x, y, payload }: any) => {
-    if (!payload || payload.value == null) return null;
-    const date = new Date(payload.value as number);
-
-    // MODE: Long term (Days)
-    if (usageViewMode === '7d' || usageViewMode === '30d' || usageViewMode === 'billing') {
-      const dayStr = date.toLocaleDateString('en-GB', {
-        timeZone: 'America/Los_Angeles',
-        day: 'numeric',
-        month: 'short'
-      });
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <text x={0} y={0} dy={16} textAnchor="middle" fill="#9ca3af" fontSize={10} fontWeight={500}>{dayStr}</text>
-        </g>
-      );
-    }
-    // MODE: Short term (Hours - 24h or Quota)
-    else {
-      // Pacific (Server/Quota Time)
-      const pacificTime = date.toLocaleTimeString('en-GB', {
-        timeZone: 'America/Los_Angeles',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      // Cairo (Local Time)
-      const cairoTime = date.toLocaleTimeString('en-GB', {
-        timeZone: 'Africa/Cairo',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      return (
-        <g transform={`translate(${x},${y})`}>
-          {/* PT Time */}
-          <text x={0} y={0} dy={16} textAnchor="middle" fill="#e5e7eb" fontSize={11} fontWeight={600}>{pacificTime}</text>
-          <text x={0} y={0} dy={26} textAnchor="middle" fill="#6b7280" fontSize={8} fontWeight={400}>PT</text>
-
-          {/* Cairo Time */}
-          <text x={0} y={0} dy={40} textAnchor="middle" fill="#9ca3af" fontSize={10}>{cairoTime}</text>
-          <text x={0} y={0} dy={50} textAnchor="middle" fill="#4b5563" fontSize={8}>EG</text>
-        </g>
-      );
+    } catch (error) {
+      console.error('Error loading numbers:', error);
+    } finally {
+      setNumbersLoadingMore(false);
     }
   };
 
-  // Click Outside Handler
+  // 2. Debounce Search
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.options-menu') && !target.closest('.btn-icon') && !target.closest('.btn-secondary')) {
-        setActiveDropdown(null);
-        setShowUsageDropdown(false);
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 800); // 800ms debounce
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // 3. Trigger Load on Dependency Change (Sort, Search Term)
+  useEffect(() => {
+    // Reset Everything
+    setNumbers([]);
+    setNumbersLastDoc(null);
+    setNumbersHasMore(true);
+    setSearchRenderLimit(20);
+    
+    // Load fresh data
+    loadNumbers(false);
+    
+    // Scroll to top
+    if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
+  }, [debouncedSearchTerm, sortField, sortDirection]);
+
+  // 4. Handle Scroll (Infinite Loading)
+  useEffect(() => {
+    const container = tableContainerRef.current;
+    if (!container || activeTableTab !== 'numbers') return;
+
+    const handleScroll = () => {
+      // Check if near bottom
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) {
+        if (numbersHasMore && !numbersLoadingMore) {
+          loadNumbers(true);
+        }
       }
     };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm, searchRenderLimit, allSearchResults]);
 
-  // --- DATA WATCHERS ---
+  // Sorting Handler
+  const handleSort = (field: 'name' | 'quizTimes' | 'screened') => {
+    if (sortField === field) {
+      // Toggle direction
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field
+      setSortField(field);
+      setSortDirection(field === 'name' ? 'asc' : 'desc'); // Default desc for numbers, asc for names
+    }
+  };
+
+
+  // --- OTHER DATA WATCHERS (Unchanged) ---
   useEffect(() => {
     getDoc(doc(db, "Dashboard", "Admin")).then(s => s.exists() && setAdminName(s.data().Name || 'Admin'));
     getDoc(doc(db, "Dashboard", "Settings")).then(s => s.exists() && (setGlobalQuiz(s.data()["Quiz-Enabled"]), setGlobalPdf(s.data()["PDF-Down"])));
 
-    // Get total users count and listen for changes
     const updateTotalCount = async () => {
       try {
         const snapshot = await getCountFromServer(collection(db, "Numbers"));
         setTotalUsersCount(snapshot.data().count);
-      } catch (error) {
-        console.error('Error getting total users count:', error);
-      }
+      } catch (error) { console.error(error); }
     };
-
     updateTotalCount();
-
-    // Listen for changes in Numbers collection to update count
-    const unsubscribeNumbers = onSnapshot(collection(db, "Numbers"), () => {
-      updateTotalCount();
-    });
+    const unsubscribeNumbers = onSnapshot(collection(db, "Numbers"), () => updateTotalCount());
 
     const u1 = onSnapshot(collection(db, "Blocked"), s => {
       const blockedData = s.docs.map(d => ({ id: d.id, number: d.id, name: d.data().Name || 'Unknown', reason: d.data().Reason || 'Unknown', date: d.data()["Blocked Date"] || '', time: d.data()["Blocked Time"] || '' }));
@@ -293,9 +295,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       const snitchesData = await Promise.all(s.docs.map(async d => {
         const snitchNum = d.data()["The Snitch"];
         let fetchedSnitchName = "Unknown";
-        if (snitchNum) {
-          try { const d = await getDoc(doc(db, "Numbers", snitchNum)); if (d.exists()) fetchedSnitchName = d.data().Name || "Unknown"; } catch { }
-        }
+        if (snitchNum) { try { const d = await getDoc(doc(db, "Numbers", snitchNum)); if (d.exists()) fetchedSnitchName = d.data().Name || "Unknown"; } catch { } }
         return { id: d.id, loginNumber: d.data()["The Login Number"], snitchNumber: snitchNum, snitchName: fetchedSnitchName, date: d.data()["Snitched Date"], time: d.data()["Snitched Time"] };
       }));
       setSnitches(snitchesData);
@@ -312,53 +312,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     return () => { u1(); u3(); u4(); unsubscribeNumbers(); };
   }, []);
 
-  // Initial load of numbers (only once)
-  useEffect(() => {
-    if (numbers.length === 0) {
-      loadNumbers();
-    }
-  }, []);
-
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Subscribe to toast visibility changes
   useEffect(() => {
-    const unsubscribe = trafficWatcher.subscribeVisibility((visible) => {
-      setIsToastVisible(visible);
-    });
+    const unsubscribe = trafficWatcher.subscribeVisibility((visible) => { setIsToastVisible(visible); });
     return unsubscribe;
   }, []);
 
-  // Debounce search term
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Reset pagination when debounced search changes
-  useEffect(() => {
-    setNumbers([]);
-    setNumbersLastDoc(null);
-    setNumbersHasMore(true);
-    loadNumbers();
-  }, [debouncedSearchTerm]);
-
-  useEffect(() => {
-    const container = tableContainerRef.current;
-    if (!container || activeTableTab !== 'numbers') return;
-    const handleScroll = () => {
-      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50 && !debouncedSearchTerm) {
-        loadNumbers(true); // Load more data on scroll (only when not searching)
+  // --- CHART TOOLTIP ---
+  const CustomTooltip = ({ active, payload, label, limit }: any) => {
+    if (active && payload && payload.length && label) {
+      const date = new Date(label as number);
+      let dateStr = '';
+      if (usageViewMode === '24h' || usageViewMode === 'quota') {
+        dateStr = date.toLocaleString('en-GB', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' (PT)';
+      } else {
+        dateStr = date.toLocaleString('en-GB', { timeZone: 'America/Los_Angeles', month: 'long', day: 'numeric' });
       }
-    };
-    container.addEventListener('scroll', handleScroll); return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm]);
+      const value = Number(payload[0].value);
+      const limitVal = limit || 0;
+      const pct = limitVal > 0 ? (value / limitVal) * 100 : 0;
+      return (
+        <div className="p-4 rounded-xl" style={{ zIndex: 1000, pointerEvents: 'none', backdropFilter: 'blur(20px)', backgroundColor: 'rgba(9, 9, 11, 0.9)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <p className="text-xs font-mono text-muted uppercase tracking-wider mb-1">{dateStr}</p>
+          <p style={{ color: payload[0].color, fontSize: '0.875rem', fontWeight: 'bold' }}>{payload[0].name}: {value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+          {limit && (<div className="mt-2 pt-2 border-t border-white/10"><div className="flex justify-between text-xs text-muted gap-4"><span>Limit:</span> <span>{limitVal.toLocaleString()}</span></div><div className="flex justify-between text-xs font-bold gap-4" style={{ color: value > limitVal ? '#ef476f' : '#06d6a0' }}><span>Used:</span> <span>{pct.toFixed(1)}%</span></div></div>)}
+        </div>
+      );
+    }
+    return null;
+  };
 
+  const CustomAxisTick = ({ x, y, payload }: any) => {
+    if (!payload || payload.value == null) return null;
+    const date = new Date(payload.value as number);
+    if (usageViewMode === '7d' || usageViewMode === '30d' || usageViewMode === 'billing') {
+      const dayStr = date.toLocaleDateString('en-GB', { timeZone: 'America/Los_Angeles', day: 'numeric', month: 'short' });
+      return (<g transform={`translate(${x},${y})`}><text x={0} y={0} dy={16} textAnchor="middle" fill="#9ca3af" fontSize={10} fontWeight={500}>{dayStr}</text></g>);
+    } else {
+      const pacificTime = date.toLocaleTimeString('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit' });
+      const cairoTime = date.toLocaleTimeString('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit' });
+      return (<g transform={`translate(${x},${y})`}><text x={0} y={0} dy={16} textAnchor="middle" fill="#e5e7eb" fontSize={11} fontWeight={600}>{pacificTime}</text><text x={0} y={0} dy={26} textAnchor="middle" fill="#6b7280" fontSize={8} fontWeight={400}>PT</text><text x={0} y={0} dy={40} textAnchor="middle" fill="#9ca3af" fontSize={10}>{cairoTime}</text><text x={0} y={0} dy={50} textAnchor="middle" fill="#4b5563" fontSize={8}>EG</text></g>);
+    }
+  };
+
+  // --- ACTIONS ---
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.options-menu') && !target.closest('.btn-icon') && !target.closest('.btn-secondary')) { setActiveDropdown(null); setShowUsageDropdown(false); }
+    };
+    document.addEventListener('click', handleClickOutside); return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (showInfoModal && activeInfo?.type === 'number') {
@@ -392,68 +400,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const handleLogout = async () => { showConfirm("Logout?", async () => { await signOut(auth); window.location.reload(); }); };
   const handleCreateUser = async () => {
     if (!newNumber || newNumber.length !== 11) return alert("Invalid Number");
-    try { await setDoc(doc(db, 'Numbers', newNumber), { "Name": "Unknown", "PDF-Down": newPdfDown, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {}, "Screened": 0 }); setShowAddModal(false); setNewNumber(''); setNewPdfDown(false); } catch (e: any) { console.error(e); }
+    try { await setDoc(doc(db, 'Numbers', newNumber), { "Name": "Unknown", "PDF-Down": newPdfDown, "Quiz-Enabled": true, "Quizi-Times": 0, "Devices": {}, "Screened": 0 }); setShowAddModal(false); setNewNumber(''); setNewPdfDown(false); loadNumbers(false); } catch (e: any) { console.error(e); }
   };
-  const handleDeleteNumber = async (id: string) => { showConfirm("Delete?", async () => { try { await deleteDoc(doc(db, 'Numbers', id.trim())); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
+  const handleDeleteNumber = async (id: string) => { showConfirm("Delete?", async () => { try { await deleteDoc(doc(db, 'Numbers', id.trim())); setActiveDropdown(null); setNumbers(prev => prev.filter(n => n.id !== id)); } catch (e) { console.error(e); } }); };
   const handleBlockNumber = async (item: NumberData) => { showConfirm(`Block ${item.name || item.number}?`, async () => { try { const now = new Date(); await setDoc(doc(db, 'Blocked', item.number), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": "Blocked by Admin", "Name": item.name || 'Unknown' }); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
-  const handleToggleQuiz = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "Quiz-Enabled": !item.quizEnabled }); setActiveDropdown(null); } catch (e) { console.error(e); } };
-  const handleTogglePdf = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "PDF-Down": !item.pdfDown }); setActiveDropdown(null); } catch (e) { console.error(e); } };
-  const handleClearScreen = async (item: NumberData) => { try { await updateDoc(doc(db, "Numbers", item.number), { Screened: 0 }); setActiveDropdown(null); } catch (e) { console.error(e); } };
-  const handleClearAllScreened = async () => { showConfirm("Clear all screened counts?", async () => { try { const numbersSnap = await getDocs(collection(db, "Numbers")); await Promise.all(numbersSnap.docs.map(doc => updateDoc(doc.ref, { Screened: 0 }))); } catch (e) { console.error(e); } }); };
+  const handleToggleQuiz = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "Quiz-Enabled": !item.quizEnabled }); setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, quizEnabled: !n.quizEnabled } : n)); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleTogglePdf = async (item: NumberData) => { try { await updateDoc(doc(db, 'Numbers', item.number), { "PDF-Down": !item.pdfDown }); setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, pdfDown: !n.pdfDown } : n)); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleClearScreen = async (item: NumberData) => { try { await updateDoc(doc(db, "Numbers", item.number), { Screened: 0 }); setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, screenedCount: 0 } : n)); setActiveDropdown(null); } catch (e) { console.error(e); } };
+  const handleClearAllScreened = async () => { showConfirm("Clear all screened counts?", async () => { try { const numbersSnap = await getDocs(collection(db, "Numbers")); await Promise.all(numbersSnap.docs.map(doc => updateDoc(doc.ref, { Screened: 0 }))); loadNumbers(false); } catch (e) { console.error(e); } }); };
   const handleUnblock = async (item: BlockedData) => { showConfirm(`Unblock ${item.number}?`, async () => { try { await deleteDoc(doc(db, "Blocked", item.number)); setActiveDropdown(null); } catch (e) { console.error(e); } }); };
   const handleDeleteBlocked = async (id: string) => { showConfirm("Delete record?", async () => { await deleteDoc(doc(db, "Blocked", id)); setActiveDropdown(null); }); };
   const handleBlockSnitch = async (item: SnitchData) => { showConfirm(`Block Snitch ${item.snitchNumber}?`, async () => { const now = new Date(); try { let name = item.snitchName; await setDoc(doc(db, "Blocked", item.snitchNumber), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": `Snitched on ${item.loginNumber}`, "Name": name || 'Unknown' }); try { await deleteDoc(doc(db, "Numbers", item.snitchNumber)); } catch { } setActiveDropdown(null); } catch (e) { console.error(e); } }); };
   const handleDeleteSnitch = async (id: string) => { showConfirm("Delete record?", async () => { await deleteDoc(doc(db, "Snitches", id)); setActiveDropdown(null); }); };
   const handleBlockBroker = async (item: BrokerData) => { showConfirm(`Block Broker ${item.number}?`, async () => { const now = new Date(); try { let name = "Unknown"; try { const d = await getDoc(doc(db, "Numbers", item.number)); if (d.exists()) name = d.data().Name || 'Unknown'; } catch (e) { } await setDoc(doc(db, "Blocked", item.number), { "Blocked Date": now.toLocaleDateString("en-GB"), "Blocked Time": now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }), "Reason": `Blocked as Broker`, "Name": name || 'Unknown' }); await deleteDoc(doc(db, "Brokers", item.id)); try { await deleteDoc(doc(db, "Numbers", item.number)); } catch { } setActiveDropdown(null); } catch (e) { console.error(e); } }); };
 
-  const filteredNumbers = numbers.filter(n => n.number?.includes(debouncedSearchTerm) || n.name?.toLowerCase()?.includes(debouncedSearchTerm.toLowerCase()));
+  // Filter other tables (Numbers handled via loadNumbers)
   const filteredBlocked = blocked.filter(b => b.number?.includes(searchTerm) || b.name?.toLowerCase()?.includes(searchTerm.toLowerCase()));
   const filteredSnitches = snitches.filter(s => s.loginNumber?.includes(searchTerm) || s.snitchNumber?.includes(searchTerm));
   const filteredBrokers = brokers.filter(b => b.number?.includes(searchTerm));
-
-  // Sorting function
-  const handleSort = (field: 'name' | 'quizTimes' | 'screened') => {
-    if (sortField === field) {
-      // If clicking the same field, reset to normal order
-      setSortField(null);
-      setSortDirection('asc');
-    } else {
-      setSortField(field);
-      // Name: A-Z (asc), Quiz Times & Screened: bigger to smaller (desc)
-      setSortDirection(field === 'name' ? 'asc' : 'desc');
-    }
-    // Scroll to top when sorting
-    if (tableContainerRef.current) {
-      tableContainerRef.current.scrollTop = 0;
-    }
-  };
-
-  // Apply sorting to filtered numbers
-  const sortedNumbers = [...filteredNumbers].sort((a, b) => {
-    if (!sortField) return 0;
-
-    if (sortField === 'name') {
-      const nameA = (a.name || '').toLowerCase();
-      const nameB = (b.name || '').toLowerCase();
-      // A-Z means ascending: names starting with A appear at the top
-      // Empty names go to the end
-      if (!nameA && !nameB) return 0;
-      if (!nameA) return 1; // Empty names go to bottom
-      if (!nameB) return -1; // Empty names go to bottom
-      return sortDirection === 'asc'
-        ? nameA.localeCompare(nameB)
-        : nameB.localeCompare(nameA);
-    } else if (sortField === 'quizTimes') {
-      // Bigger to smaller: b - a puts bigger numbers first (at top)
-      return b.quizTimes - a.quizTimes;
-    } else if (sortField === 'screened') {
-      // Bigger to smaller: b - a puts bigger numbers first (at top)
-      return b.screenedCount - a.screenedCount;
-    }
-    return 0;
-  });
-
-  const visibleNumbers = sortedNumbers;
 
   // --- FILES LOGIC ---
   const loadFiles = async (path: string) => { try { const r = ref(storage, path); const res = await listAll(r); const fs = res.prefixes.map(p => ({ name: p.name, type: 'folder' as const, fullPath: p.fullPath })); const is = await Promise.all(res.items.map(async i => ({ name: i.name, type: 'file' as const, fullPath: i.fullPath, url: await getDownloadURL(i) }))); setFiles([...fs, ...is]); setSelectedFiles([]); } catch { } };
@@ -462,16 +426,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const handleNavigateBack = () => { if (pathHistory.length > 0) { const newHistory = [...pathHistory]; const prevPath = newHistory.pop(); setPathHistory(newHistory); setCurrentPath(prevPath || ''); } };
   const handleCreateFolder = async (name: string) => { try { await uploadBytes(ref(storage, `${currentPath ? currentPath + '/' : ''}${name}/.placeholder`), new Blob([''])); setShowFolderModal(false); setFolderName(''); loadFiles(currentPath); } catch { } };
   const handleUploadFile = async (file: File) => { try { const path = `${currentPath ? currentPath + '/' : ''}${file.name}`; await uploadBytes(ref(storage, path), file); loadFiles(currentPath); } catch (e) { console.error(e); } };
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      await handleUploadFile(file);
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('PDF Uploaded', { body: `File: ${file.name}`, icon: '/favicon.ico' });
-      }
-      e.target.value = '';
-    }
-  };
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file && file.type === 'application/pdf') { await handleUploadFile(file); if ('Notification' in window && Notification.permission === 'granted') { new Notification('PDF Uploaded', { body: `File: ${file.name}`, icon: '/favicon.ico' }); } e.target.value = ''; } };
   const toggleFileSelection = (path: string) => { setSelectedFiles(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]); };
   const handleSelectAll = () => { if (selectedFiles.length === files.length) setSelectedFiles([]); else setSelectedFiles(files.map(f => f.fullPath)); };
   const deleteFolderRecursive = async (path: string) => { try { const list = await listAll(ref(storage, path)); await Promise.all(list.items.map(i => deleteObject(i))); await Promise.all(list.prefixes.map(p => deleteFolderRecursive(p.fullPath))); } catch (e) { console.error("Recursive delete failed", e); } };
@@ -483,7 +438,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   useEffect(() => { if (activeSection !== 'shots') return; const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'ArrowLeft') { setCurrentShotIndex(p => Math.max(0, p - 1)); } else if (e.key === 'ArrowRight') { setCurrentShotIndex(p => Math.min(shots.length - 1, p + 1)); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [activeSection, shots.length]);
   const handleDeleteShot = async () => { showConfirm("Delete?", async () => { try { await deleteObject(ref(storage, shots[currentShotIndex].fullPath)); const n = [...shots]; n.splice(currentShotIndex, 1); setShots(n); if (currentShotIndex >= n.length) setCurrentShotIndex(Math.max(0, n.length - 1)); } catch { } }); };
 
-  // --- FIREBASE USAGE LOGIC (UPDATED) ---
+  // --- FIREBASE USAGE LOGIC ---
   useEffect(() => {
     if (activeSection === 'firebase') {
       const fetchUsage = async () => {
@@ -492,39 +447,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           const getUsage = httpsCallable(functions, 'getFirebaseUsage');
           const result = await getUsage({ mode: usageViewMode });
           const data = result.data as any;
-
-          // Logic to accumulate data for "Quota" (showing usage rising through the day) 
-          // or "Billing" (showing usage rising through the month)
           const shouldAccumulate = usageViewMode === 'quota' || usageViewMode === 'billing';
-
           const processSeries = (series: any[]) => {
             if (!series) return [];
             if (!shouldAccumulate) return series;
             let sum = 0;
-            return series.map(item => {
-              sum += item.value;
-              return { ...item, value: sum };
-            });
+            return series.map(item => { sum += item.value; return { ...item, value: sum }; });
           };
-
-          if (data?.firestore) {
-            data.firestore.reads.data = processSeries(data.firestore.reads.data);
-            data.firestore.writes.data = processSeries(data.firestore.writes.data);
-          }
-          if (data?.storage) {
-            data.storage.bandwidth.data = processSeries(data.storage.bandwidth.data);
-            data.storage.requests.data = processSeries(data.storage.requests.data);
-          }
-
+          if (data?.firestore) { data.firestore.reads.data = processSeries(data.firestore.reads.data); data.firestore.writes.data = processSeries(data.firestore.writes.data); }
+          if (data?.storage) { data.storage.bandwidth.data = processSeries(data.storage.bandwidth.data); data.storage.requests.data = processSeries(data.storage.requests.data); }
           setFirebaseUsage(data);
           setLastUpdated(new Date());
-        } catch (error) {
-          console.error('Failed to fetch Firebase usage:', error);
-        } finally {
-          setLoadingUsage(false);
-        }
+        } catch (error) { console.error('Failed to fetch Firebase usage:', error); } finally { setLoadingUsage(false); }
       };
-
       fetchUsage();
       const interval = setInterval(fetchUsage, 5 * 60 * 1000);
       return () => clearInterval(interval);
@@ -567,7 +502,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         </header>
 
         <div className="content-body custom-scrollbar">
-          {/* ... [TABLES, FILES, SHOTS SECTIONS REMAIN UNCHANGED FOR BREVITY - THEY ARE CORRECT] ... */}
           {activeSection === 'tables' && (
             <div className="h-full flex flex-col gap-4">
               <div className={`table-toolbar justify-between gap-3 ${isMobile ? 'flex-col' : 'flex-row'}`}>
@@ -607,7 +541,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('name')}><div className="flex items-center gap-2">Name {sortField === 'name' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('quizTimes')}><div className="flex items-center gap-2">Quiz Times {sortField === 'quizTimes' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('screened')}><div className="flex items-center gap-2">Screened {sortField === 'screened' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th>Status</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>)}</tr>
                     </thead>
                     <tbody>
-                      {(activeTableTab === 'numbers' ? visibleNumbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
+                      {(activeTableTab === 'numbers' ? numbers : activeTableTab === 'blocked' ? filteredBlocked : activeTableTab === 'snitches' ? filteredSnitches : filteredBrokers).map((item) => (
                         <tr key={item.id}>
                           {activeTableTab === 'numbers' && (
                             <>
@@ -635,6 +569,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                               </td>
                             </>
                           )}
+                          {/* Other table rows remain unchanged (Blocked, Snitches, Brokers) */}
                           {activeTableTab === 'blocked' && (
                             <>
                               <td className="font-mono text-muted">{(item as BlockedData).number}</td>
@@ -709,25 +644,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           )}
                         </tr>
                       ))}
-                      {activeTableTab === 'numbers' && numbersLoadingMore && !debouncedSearchTerm && (
+                      {/* Loading Indicators */}
+                      {activeTableTab === 'numbers' && numbersLoadingMore && (
                         <tr>
-                          <td colSpan={6} className="text-center py-4">
+                          <td colSpan={7} className="text-center py-4">
                             <div className="flex items-center justify-center gap-2 text-muted">
                               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                              <span>Loading more users...</span>
+                              <span>{debouncedSearchTerm ? 'Loading more results...' : 'Loading more users...'}</span>
                             </div>
                           </td>
                         </tr>
                       )}
-                      {activeTableTab === 'numbers' && numbersLoadingMore && debouncedSearchTerm && (
-                        <tr>
-                          <td colSpan={6} className="text-center py-4">
-                            <div className="flex items-center justify-center gap-2 text-muted">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                              <span>Searching users...</span>
-                            </div>
-                          </td>
-                        </tr>
+                      {activeTableTab === 'numbers' && !numbersLoadingMore && numbers.length === 0 && (
+                         <tr><td colSpan={7} className="text-center py-10 text-muted">No users found.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -736,26 +665,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               </div>
             </div>
           )}
+          
+          {/* Files, Shots, Firebase Sections (Same as original, abbreviated for brevity) */}
           {activeSection === 'files' && (
-            <div className="h-full flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button onClick={handleNavigateBack} disabled={pathHistory.length === 0} className={`btn-icon border border-white/10 bg-surface ${pathHistory.length === 0 ? 'opacity-50' : ''}`}><ArrowLeft size={16} /></button>
-                  <div className="flex items-center bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-muted font-mono"><span onClick={() => { setCurrentPath(''); setPathHistory([]); }} className="cursor-pointer hover:text-white">root/</span>{currentPath}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {selectedFiles.length > 0 && <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>}
-                  <div className="view-toggle-group mr-2">
-                    <button onClick={() => setFileViewMode('grid')} className={`view-toggle-btn ${fileViewMode === 'grid' ? 'active' : ''}`}><LayoutGrid size={16} /></button>
-                    <button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button>
-                  </div>
-                  <button onClick={() => setShowFolderModal(true)} className="btn btn-secondary btn-toolbar"><FolderOpen size={16} /> New Folder</button>
-                  <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
-                </div>
-              </div>
-
-              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
+             // ... existing file section code ...
+             <div className="h-full flex flex-col gap-4">
+               {/* Same structure as before, just placeholder here to keep code block valid */}
+               <div className="flex items-center justify-between">
+                 {/* ... header ... */}
+                 <div className="flex items-center gap-2">
+                   <button onClick={handleNavigateBack} disabled={pathHistory.length === 0} className={`btn-icon border border-white/10 bg-surface ${pathHistory.length === 0 ? 'opacity-50' : ''}`}><ArrowLeft size={16} /></button>
+                   <div className="flex items-center bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-muted font-mono"><span onClick={() => { setCurrentPath(''); setPathHistory([]); }} className="cursor-pointer hover:text-white">root/</span>{currentPath}</div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   {selectedFiles.length > 0 && <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>}
+                   <div className="view-toggle-group mr-2"><button onClick={() => setFileViewMode('grid')} className={`view-toggle-btn ${fileViewMode === 'grid' ? 'active' : ''}`}><LayoutGrid size={16} /></button><button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button></div>
+                   <button onClick={() => setShowFolderModal(true)} className="btn btn-secondary btn-toolbar"><FolderOpen size={16} /> New Folder</button>
+                   <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
+                 </div>
+               </div>
+               <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+                  {/* File display logic (same as original) */}
+                  <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
                   {fileViewMode === 'grid' ? (
                     <div className="file-grid-layout">
                       {files.map(file => {
@@ -775,6 +706,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                       {files.length === 0 && <div className="col-span-full text-center text-muted py-10 opacity-50">Empty Directory</div>}
                     </div>
                   ) : (
+                    // Table view logic
                     <div className="flex flex-col gap-1">
                       <div className="file-table-layout px-4 py-3 text-xs font-bold text-muted uppercase border-b border-white/10 items-center bg-white/5 rounded-t-lg">
                         <div onClick={handleSelectAll} className="cursor-pointer hover:text-white flex items-center">{selectedFiles.length === files.length && files.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}</div>
@@ -799,14 +731,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
+               </div>
+             </div>
           )}
 
           {activeSection === 'shots' && (
-            <div className="h-full flex flex-col gap-4">
-              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+             // ... existing shots code ...
+             <div className="h-full flex flex-col gap-4">
+                <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
                   {shots.length > 0 ? (
                     <div className="w-full max-w-4xl flex flex-col gap-4" style={{ height: '100%' }}>
                       <div className={`relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl flex items-center justify-center ${isMobile ? 'w-full h-full' : 'aspect-video'}`} style={isMobile ? { width: '100%', height: '100vh' } : { width: '100%', height: '100%' }}>
@@ -818,9 +751,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   ) : (
                     <div className="text-muted flex flex-col items-center gap-4"><Camera size={48} className="opacity-20" /><p>No screenshots captured</p></div>
                   )}
+                  </div>
                 </div>
-              </div>
-              {shots.length > 0 && (
+                {shots.length > 0 && (
                 <div className={`flex justify-between items-center bg-surface rounded-xl border border-white/10 ${isMobile ? 'p-2 flex-col gap-2' : 'p-4'}`}>
                   <div>
                     <div className={`font-mono text-muted ${isMobile ? 'text-xs' : 'text-sm'}`}>{shots[currentShotIndex]?.name}</div>
@@ -832,7 +765,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   </div>
                 </div>
               )}
-            </div>
+             </div>
           )}
 
           {activeSection === 'firebase' && (
