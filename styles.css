@@ -264,11 +264,19 @@ button, input { font-family: inherit; font-size: inherit; }
 
 /* Sidebar */
 .sidebar { width: var(--sidebar-width); background-color: #050505; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; flex-shrink: 0; }
-.sidebar-header { height: var(--header-height); padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--color-border); }
+.sidebar-header { height: var(--header-height); padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
 .nav-btn { width: 100%; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-radius: var(--radius-md); color: var(--color-text-muted); background: transparent; border: none; font-weight: 500; font-size: 0.875rem; transition: all 0.2s; cursor: pointer; }
 .nav-btn:hover { background-color: var(--color-surface); color: var(--color-text-main); }
 .nav-btn.active { background-color: var(--color-surface-hover); color: var(--color-text-main); }
 .nav-btn.admin-nav-btn.active { color: var(--color-primary); background-color: rgba(38, 132, 252, 0.08); }
+
+/* Sidebar content area for scrolling */
+.sidebar nav {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 0;
+}
 
 /* Layout & Grid */
 .main-content { flex: 1; display: flex; flex-direction: column; background-color: #000; overflow: hidden; }
@@ -290,6 +298,21 @@ button, input { font-family: inherit; font-size: inherit; }
 .modal-xl { max-width: 1200px; height: 90vh; }
 .modal-full { max-width: 95vw; height: 95vh; }
 
+/* Mobile modal height constraints */
+@media (max-width: 900px) {
+  .modal-content {
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Ensure modal content is scrollable but doesn't exceed screen height */
+  .modal-content > .flex-grow {
+    overflow-y: auto;
+    max-height: calc(90vh - 120px);
+  }
+}
+
 /* Responsive Sidebar behaviour for small screens */
 @media (max-width: 900px) {
   :root { --sidebar-width: 260px; }
@@ -302,6 +325,8 @@ button, input { font-family: inherit; font-size: inherit; }
     transform: translateX(-110%);
     transition: transform 0.25s ease;
     box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .sidebar.mobile-open { transform: translateX(0); }
 
@@ -335,8 +360,14 @@ button, input { font-family: inherit; font-size: inherit; }
   }
   .md-flex { display: none; }
 
-  /* Make modals full width on mobile */
+  /* Make modals full width on mobile and constrain height */
   .modal-lg { max-width: 95vw; }
+  .modal-content { max-height: 90vh; }
+
+  /* Ensure modals don't exceed phone height */
+  @supports (height: 100dvh) {
+    .modal-content { max-height: 90dvh; }
+  }
 
   /* Admin Login Responsive */
   .admin-login-container {
@@ -491,6 +522,8 @@ button, input { font-family: inherit; font-size: inherit; }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 @keyframes menuPopup { from { opacity: 0; transform: scale(0.9) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes limitPulse { 0%, 100% { opacity: 0.8; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
+@keyframes limitFlash { 0%, 100% { stroke-width: 1; } 50% { stroke-width: 2; } }
 
 .animate-scale-in { animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .animate-fade-in { animation: fade-in 0.2s ease-out; }
@@ -504,6 +537,22 @@ button, input { font-family: inherit; font-size: inherit; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* Animated Limit Lines for Firebase Charts */
+.limit-line-animated {
+  animation: limitPulse 2s ease-in-out infinite;
+  stroke-width: 1.5px;
+}
+
+.recharts-reference-line line {
+  animation: limitFlash 1.5s ease-in-out infinite;
+}
+
+/* Ensure limit lines are visible and animated */
+.recharts-reference-line text {
+  animation: limitPulse 2s ease-in-out infinite;
+  font-weight: bold;
+}
 
 /* Large Icon */
 .icon-large { width: 50%; height: 50%; }
@@ -555,8 +604,97 @@ button, input { font-family: inherit; font-size: inherit; }
 /* Quiz section styles */
 .quiz-container {
     background-color: rgba(9, 9, 11, 0.2);
-    padding: var(--space-lg);
+    padding: 0;
     border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Mobile quiz section adjustments */
+@media (max-width: 900px) {
+  .quiz-container {
+    padding: var(--space-sm);
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  /* Quiz type selection - make buttons full width and larger */
+  .quiz-btn {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    font-size: 0.9rem;
+    margin-bottom: var(--space-xs);
+  }
+
+  /* Quiz map selection - make cards more compact and full width */
+  .quiz-section-card {
+    padding: var(--space-xs) var(--space-sm);
+    margin-bottom: var(--space-xs);
+    border-radius: var(--radius-md);
+  }
+
+  /* Quiz configuration - make sliders and buttons more touch-friendly */
+  .quiz-range-input {
+    height: 6px;
+  }
+
+  .quiz-range-input::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+  }
+
+  .quiz-config-btn {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+    min-width: 60px;
+  }
+
+  /* Active quiz - make choices larger and more touch-friendly */
+  .quiz-choice {
+    padding: var(--space-sm) var(--space-md);
+    font-size: 0.9rem;
+    min-height: 50px;
+    margin-bottom: var(--space-xs);
+    width: 100%;
+    display: block;
+  }
+
+  /* Ensure quiz choices container takes full width */
+  .quiz-choices-container {
+    width: 100%;
+  }
+
+  /* Make quiz question text full width and properly aligned */
+  .quiz-result-question, .quiz-answer-text, .quiz-explanation-text {
+    width: 100%;
+    display: block;
+  }
+
+  /* Make quiz cards and containers full width */
+  .quiz-section-card, .quiz-result-box, .quiz-answer-box, .quiz-explanation-box {
+    width: 100%;
+  }
+
+  /* Quiz results - make result boxes more compact */
+  .quiz-result-box {
+    padding: var(--space-xs) var(--space-sm);
+    margin-bottom: var(--space-xs);
+    border-radius: var(--radius-md);
+  }
+
+  /* Back button - make it more prominent */
+  .back-link-btn {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+    margin-bottom: var(--space-sm);
+    border-radius: var(--radius-md);
+  }
+
+  /* Make quiz content containers full width with appropriate padding */
+  .p-6, .px-6, .py-6 {
+    padding: var(--space-xs) var(--space-sm) !important;
+  }
 }
 
 .quiz-btn {
@@ -940,7 +1078,34 @@ button, input { font-family: inherit; font-size: inherit; }
 /* --- USAGE TOAST --- */
 .usage-toast {
     position: fixed;
-    z-index: 1000;
+    bottom: 20px;
+    right: 20px;
+    z-index: 100;
+}
+
+/* Touch-specific styles for better mobile interaction */
+@media (max-width: 900px) {
+    .usage-toast-header {
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        -khtml-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+    }
+
+    .usage-toast {
+        cursor: grab;
+    }
+
+    .usage-toast.usage-toast-dragging {
+        cursor: grabbing;
+    }
+
+    .usage-toast-close {
+        touch-action: manipulation;
+    }
 }
 
 .usage-toast-container {
@@ -950,6 +1115,7 @@ button, input { font-family: inherit; font-size: inherit; }
     border-radius: var(--radius-lg);
     box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
     padding: var(--space-md);
+    min-width: 280px;
     user-select: none;
 }
 
@@ -1040,12 +1206,27 @@ button, input { font-family: inherit; font-size: inherit; }
 }
 
 .usage-toast-stat-flash-emerald {
-    background-color: rgba(16, 185, 129, 0.2);
-    box-shadow: 0 0 0 1px rgba(16, 185, 129, 1);
+  background-color: rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 1);
 }
 
-.usage-toast-dragging {
-    user-select: none;
-    pointer-events: none;
-    opacity: 0.8;
+/* Mobile modal height constraints */
+@media (max-width: 900px) {
+.modal-content .overflow-y-auto {
+  max-height: 60vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-md.p-0 {
+  max-height: 85vh;
+}
+}
+
+@supports (height: 100dvh) {
+@media (max-width: 900px) {
+  .modal-md.p-0 {
+    max-height: 85dvh;
+  }
+}
 }

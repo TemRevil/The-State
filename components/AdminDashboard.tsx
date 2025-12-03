@@ -33,8 +33,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   
   // --- NUMBERS DATA STATE ---
   const [numbers, setNumbers] = useState<NumberData[]>([]);
-  // Store all search results here to paginate client-side when searching
-  const [allSearchResults, setAllSearchResults] = useState<NumberData[]>([]); 
   
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
   const [snitches, setSnitches] = useState<SnitchData[]>([]);
@@ -42,6 +40,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeInfo, setActiveInfo] = useState<ActiveInfo | null>(null);
   const [loginAttemptsData, setLoginAttemptsData] = useState<LoginAttempt[]>([]);
   const [totalUsersCount, setTotalUsersCount] = useState<number>(0);
+  const [usersWithNamesCount, setUsersWithNamesCount] = useState<number>(0);
 
   const [brokers, setBrokers] = useState<BrokerData[]>([]);
   const [adminName, setAdminName] = useState('Admin');
@@ -89,7 +88,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [numbersLastDoc, setNumbersLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [numbersHasMore, setNumbersHasMore] = useState(true);
   const [numbersLoadingMore, setNumbersLoadingMore] = useState(false);
-  const [searchRenderLimit, setSearchRenderLimit] = useState(20); // Virtual pagination limit for search results
 
   // Sorting state
   const [sortField, setSortField] = useState<'name' | 'quizTimes' | 'screened' | null>(null);
@@ -105,7 +103,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
   // --- NUMBERS LOADING LOGIC ---
 
-  // Helper to map doc to data
   const mapNumberDoc = (d: any): NumberData => ({
     id: d.id,
     number: d.id,
@@ -118,99 +115,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     devices: d.data().Devices
   });
 
-  // 1. Load Numbers (Handles both Initial Load, Scrolling, and Sorting)
+  // 1. Debounce Search (Updated to 2000ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 2000); // Wait 2 seconds before searching
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // 2. Load Numbers (Handles Initial Load, Scrolling, Search & Sorting)
   const loadNumbers = async (isLoadMore = false) => {
-    // Prevent duplicate loads
     if (isLoadMore && numbersLoadingMore) return;
     if (isLoadMore && !numbersHasMore) return;
 
     setNumbersLoadingMore(true);
 
     try {
+      const collectionRef = collection(db, "Numbers");
+      let q;
+
       if (debouncedSearchTerm) {
         // --- SEARCH MODE ---
-        // When searching, we want to "Search in ALL numbers", then sort, then paginate locally.
-        // Server-side filtering for 'contains' is not possible efficiently.
-        // We fetch a large batch (effectively all for typical use cases, e.g. 2000) and filter/sort in memory.
+        // Search directly in Firestore using prefixes to avoid high reads.
+        // We only fetch 20 at a time, even for search results.
         
-        if (!isLoadMore) {
-          // New Search: Fetch fresh data
-          // Note: In a huge app, you'd use Algolia. Here we fetch the collection to filter locally.
-          const q = query(collection(db, "Numbers"), limit(2000)); 
-          const snapshot = await getDocs(q);
-          const rawData = snapshot.docs.map(mapNumberDoc);
+        const term = debouncedSearchTerm.trim();
+        const isNumeric = /^\d+$/.test(term);
 
-          // Filter
-          const term = debouncedSearchTerm.toLowerCase();
-          const filtered = rawData.filter(n => 
-             n.number.includes(term) || (n.name && n.name.toLowerCase().includes(term))
+        if (isNumeric) {
+          // Search by ID (Number)
+          // Note: When using 'where' on __name__, orderBy must also be __name__
+          q = query(
+             collectionRef, 
+             where('__name__', '>=', term),
+             where('__name__', '<=', term + '\uf8ff'),
+             orderBy('__name__'), // Mandatory sort for this where clause
+             limit(numbersPageSize)
           );
-
-          // Sort
-          const sorted = filtered.sort((a, b) => {
-             if (!sortField) return 0; // Default order
-             if (sortField === 'name') {
-               const nameA = (a.name || '').toLowerCase();
-               const nameB = (b.name || '').toLowerCase();
-               return sortDirection === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
-             }
-             if (sortField === 'quizTimes') return sortDirection === 'asc' ? a.quizTimes - b.quizTimes : b.quizTimes - a.quizTimes;
-             if (sortField === 'screened') return sortDirection === 'asc' ? a.screenedCount - b.screenedCount : b.screenedCount - a.screenedCount;
-             return 0;
-          });
-
-          setAllSearchResults(sorted);
-          setSearchRenderLimit(20); // Reset visible limit
-          setNumbers(sorted.slice(0, 20)); // Show first 20
-          setNumbersHasMore(sorted.length > 20);
         } else {
-          // Scrolling in Search Mode: Just show more from memory
-          const nextLimit = searchRenderLimit + 20;
-          setSearchRenderLimit(nextLimit);
-          setNumbers(allSearchResults.slice(0, nextLimit));
-          setNumbersHasMore(allSearchResults.length > nextLimit);
+          // Search by Name
+          // Firestore requires the first orderBy to match the filter field
+          q = query(
+            collectionRef,
+            where('Name', '>=', term),
+            where('Name', '<=', term + '\uf8ff'),
+            orderBy('Name'), // Mandatory sort for this where clause
+            limit(numbersPageSize)
+          );
+        }
+
+        // Handle pagination for search results
+        if (isLoadMore && numbersLastDoc) {
+           q = query(q, startAfter(numbersLastDoc));
         }
 
       } else {
-        // --- DEFAULT MODE (Server-Side Pagination & Sorting) ---
-        // This pulls 20 items from Firestore at a time, strictly following the sort order of the collection.
+        // --- DEFAULT MODE ---
+        // Efficient Sort & Pagination
         
-        let q;
-        const collectionRef = collection(db, "Numbers");
-        
-        // Determine Firestore Sort Field
-        let firestoreOrderBy: any = orderBy('__name__'); // Default to ID
+        let firestoreOrderBy: any = orderBy('__name__', sortDirection); // Default
+
         if (sortField === 'name') firestoreOrderBy = orderBy('Name', sortDirection);
         else if (sortField === 'quizTimes') firestoreOrderBy = orderBy('Quizi-Times', sortDirection);
         else if (sortField === 'screened') firestoreOrderBy = orderBy('Screened', sortDirection);
-        else if (!sortField) firestoreOrderBy = orderBy('__name__', sortDirection); // ID Sort
 
         if (!isLoadMore) {
-           // Initial Fetch
            q = query(collectionRef, firestoreOrderBy, limit(numbersPageSize));
         } else if (numbersLastDoc) {
-           // Next Page
            q = query(collectionRef, firestoreOrderBy, startAfter(numbersLastDoc), limit(numbersPageSize));
         } else {
            setNumbersLoadingMore(false);
            return; 
         }
-
-        const snapshot = await getDocs(q);
-        const newNumbers = snapshot.docs.map(mapNumberDoc);
-
-        if (!isLoadMore) {
-          setNumbers(newNumbers);
-        } else {
-          setNumbers(prev => [...prev, ...newNumbers]);
-        }
-
-        // Update cursor
-        if (snapshot.docs.length > 0) {
-           setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-        }
-        setNumbersHasMore(snapshot.docs.length === numbersPageSize);
       }
+
+      const snapshot = await getDocs(q);
+      const newNumbers = snapshot.docs.map(mapNumberDoc);
+
+      if (!isLoadMore) {
+        setNumbers(newNumbers);
+      } else {
+        setNumbers(prev => [...prev, ...newNumbers]);
+      }
+
+      // Update cursor for infinite scroll
+      if (snapshot.docs.length > 0) {
+         setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      }
+      
+      // If we got fewer docs than the limit, we've reached the end
+      setNumbersHasMore(snapshot.docs.length === numbersPageSize);
+
     } catch (error) {
       console.error('Error loading numbers:', error);
     } finally {
@@ -218,21 +213,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     }
   };
 
-  // 2. Debounce Search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 800); // 800ms debounce
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
   // 3. Trigger Load on Dependency Change (Sort, Search Term)
   useEffect(() => {
-    // Reset Everything
+    // Reset List
     setNumbers([]);
     setNumbersLastDoc(null);
     setNumbersHasMore(true);
-    setSearchRenderLimit(20);
     
     // Load fresh data
     loadNumbers(false);
@@ -247,7 +233,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     if (!container || activeTableTab !== 'numbers') return;
 
     const handleScroll = () => {
-      // Check if near bottom
+      // Check if near bottom (50px buffer)
       if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) {
         if (numbersHasMore && !numbersLoadingMore) {
           loadNumbers(true);
@@ -256,22 +242,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     };
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm, searchRenderLimit, allSearchResults]);
+  }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm, sortField, sortDirection, numbersLastDoc]);
 
-  // Sorting Handler - Three states: asc -> desc -> normal (unsorted)
+  // Sorting Handler
   const handleSort = (field: 'name' | 'quizTimes' | 'screened') => {
+    // If we are searching by Name, we can't easily sort by QuizTimes efficiently 
+    // without client-side filtering (high reads) or advanced indexes.
+    // For this implementation, we allow changing the sort state, which triggers a reload.
+    // Note: If searching, loadNumbers logic overrides sortField to match the search query (Name or ID)
+    // to keep reads low.
+    
     if (sortField === field) {
-      // Same field clicked - cycle through states
-      if (sortDirection === 'asc') {
-        // First click: asc -> desc
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        // Second click: desc -> normal (unsorted)
+      if (sortDirection === 'asc') setSortDirection('desc');
+      else if (sortDirection === 'desc') {
         setSortField(null);
-        setSortDirection('asc'); // Reset for next time
+        setSortDirection('asc');
       }
     } else {
-      // Different field clicked - start with asc
       setSortField(field);
       setSortDirection('asc');
     }
@@ -287,6 +274,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       try {
         const snapshot = await getCountFromServer(collection(db, "Numbers"));
         setTotalUsersCount(snapshot.data().count);
+
+        // Count users with names (Optimized to not read all docs if possible, but here limit 1000 is used for estimate)
+        // To save reads, we could rely on a counter in a dashboard doc, but sticking to existing logic with small limit
+        const numbersSnapshot = await getDocs(query(collection(db, "Numbers"), where("Name", "!=", ""), limit(50))); // Reduced check for efficiency
+        // Note: Counting accurately requires reads. `getCountFromServer` with query is better
+        const namedSnapshot = await getCountFromServer(query(collection(db, "Numbers"), where("Name", ">", "")));
+        setUsersWithNamesCount(namedSnapshot.data().count);
       } catch (error) { console.error(error); }
     };
     updateTotalCount();
@@ -478,18 +472,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       {/* SIDEBAR */}
-      <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''}`}>
+      <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''} p-4`}>
         <div className="sidebar-header gap-3">
           <div className="rounded border border-indigo-900/50 flex items-center justify-center text-indigo-500 bg-indigo-500/10" style={{ width: '32px', height: '32px' }}><ShieldAlert size={18} /></div>
           <div><h1 className="font-bold text-white text-sm">The State</h1></div>
         </div>
-        <nav className="flex-1 p-4 flex flex-col gap-2">
+        <nav className="flex-1 flex flex-col gap-2 mt-4">
           <button onClick={() => setActiveSection('tables')} className={`nav-btn admin-nav-btn ${activeSection === 'tables' ? 'active' : ''}`}><LayoutGrid size={18} /> Tables</button>
           <button onClick={() => setActiveSection('files')} className={`nav-btn admin-nav-btn ${activeSection === 'files' ? 'active' : ''}`}><FolderOpen size={18} /> Files</button>
           <button onClick={() => setActiveSection('shots')} className={`nav-btn admin-nav-btn ${activeSection === 'shots' ? 'active' : ''}`}><Camera size={18} /> Shots</button>
           <button onClick={() => setActiveSection('firebase')} className={`nav-btn admin-nav-btn ${activeSection === 'firebase' ? 'active' : ''}`}><Database size={18} /> Firebase</button>
         </nav>
-        <div className="p-4 border-t border-white/10 flex flex-col gap-2">
+        <div className="border-t border-white/10 flex flex-col gap-2 mt-4 pt-4">
           <button onClick={onBack} className="nav-btn"><ArrowLeft size={16} /> Back to User View</button>
           <button onClick={handleLogout} className="nav-btn hover:text-error hover:bg-red-500/10"><LogOut size={16} /> Sign Out</button>
         </div>
@@ -657,7 +651,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                           <td colSpan={7} className="text-center py-4">
                             <div className="flex items-center justify-center gap-2 text-muted">
                               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                              <span>{debouncedSearchTerm ? 'Loading more results...' : 'Loading more users...'}</span>
+                              <span>{debouncedSearchTerm ? 'Searching...' : 'Loading more users...'}</span>
                             </div>
                           </td>
                         </tr>
@@ -784,9 +778,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   <div className="p-3 bg-primary/10 rounded-lg text-primary"><Database size={24} /></div>
                   <div className="flex-1">
                     <div className="text-2xl font-bold text-white">
-                      {loadingUsage ? '...' : totalUsersCount.toLocaleString()}
+                      {loadingUsage ? '...' : `${usersWithNamesCount.toLocaleString()} / ${totalUsersCount.toLocaleString()}`}
                     </div>
-                    <p className="text-xs text-muted">Total Users</p>
+                    <p className="text-xs text-muted">Signed Users / Total Users</p>
                   </div>
                   <button
                     onClick={() => trafficWatcher.toggleToast()}
@@ -871,6 +865,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             stroke="#ef476f"
                             strokeDasharray="5 5"
                             label={usageViewMode === 'quota' ? { value: "Limit: 50k", position: "insideTopRight", fill: "#ef476f" } : undefined}
+                            className="limit-line-animated"
                           />
                           <Bar dataKey="value" name="Reads" fill="#ef476f" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -902,6 +897,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             stroke="#ffd166"
                             strokeDasharray="5 5"
                             label={usageViewMode === 'quota' ? { value: "Limit: 20k", position: "insideTopRight", fill: "#ffd166" } : undefined}
+                            className="limit-line-animated"
                           />
                           <Bar dataKey="value" name="Writes" fill="#ffd166" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -940,6 +936,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             stroke="#06d6a0"
                             strokeDasharray="5 5"
                             label={usageViewMode === 'quota' ? { value: "Limit: 1GB", position: "insideTopRight", fill: "#06d6a0" } : undefined}
+                            className="limit-line-animated"
                           />
                           <Bar dataKey="value" name="Bandwidth" fill="#06d6a0" radius={[4, 4, 0, 0]} />
                         </BarChart>

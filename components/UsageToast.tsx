@@ -35,6 +35,18 @@ export const UsageToast: React.FC = () => {
         e.preventDefault();
     };
 
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if (!toastRef.current) return;
+        setIsDragging(true);
+        const rect = toastRef.current.getBoundingClientRect();
+        const touch = e.touches[0];
+        setDragOffset({
+            x: touch.clientX - rect.left,
+            y: touch.clientY - rect.top
+        });
+        e.preventDefault();
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
         if (!isDragging) return;
 
@@ -51,7 +63,30 @@ export const UsageToast: React.FC = () => {
         setPosition({ x: clampedX, y: clampedY });
     };
 
+    const handleTouchMove = (e: TouchEvent) => {
+        if (!isDragging) return;
+
+        const touch = e.touches[0];
+        const newX = touch.clientX - dragOffset.x;
+        const newY = touch.clientY - dragOffset.y;
+
+        // Keep within viewport bounds
+        const maxX = window.innerWidth - 280; // toast width approx
+        const maxY = window.innerHeight - 200; // toast height approx
+
+        const clampedX = Math.max(0, Math.min(newX, maxX));
+        const clampedY = Math.max(0, Math.min(newY, maxY));
+
+        setPosition({ x: clampedX, y: clampedY });
+        e.preventDefault();
+    };
+
     const handleMouseUp = () => {
+        setIsDragging(false);
+        localStorage.setItem('usageToastPosition', JSON.stringify(position));
+    };
+
+    const handleTouchEnd = () => {
         setIsDragging(false);
         localStorage.setItem('usageToastPosition', JSON.stringify(position));
     };
@@ -72,15 +107,19 @@ export const UsageToast: React.FC = () => {
             setVisible(isVisible);
         });
 
-        // Add global mouse event listeners for drag
+        // Add global event listeners for drag
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('touchmove', handleTouchMove);
+        document.addEventListener('touchend', handleTouchEnd);
 
         return () => {
             unsubStats();
             unsubVis();
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
+            document.removeEventListener('touchmove', handleTouchMove);
+            document.removeEventListener('touchend', handleTouchEnd);
         };
     }, [isDragging, dragOffset, position]);
 
@@ -114,6 +153,7 @@ export const UsageToast: React.FC = () => {
                 <div
                     className="usage-toast-header"
                     onMouseDown={handleMouseDown}
+                    onTouchStart={handleTouchStart}
                     style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                 >
                     <div className="usage-toast-title">
@@ -124,6 +164,7 @@ export const UsageToast: React.FC = () => {
                         onClick={() => trafficWatcher.toggleToast()}
                         className="usage-toast-close"
                         onMouseDown={(e) => e.stopPropagation()} // Prevent drag when clicking close
+                        onTouchStart={(e) => e.stopPropagation()} // Prevent drag when touching close
                     >
                         <X size={14} />
                     </button>
