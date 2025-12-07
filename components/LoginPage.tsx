@@ -294,10 +294,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               ref={nameRef}
               type="text"
               value={nameValue}
-              onChange={(e) => setNameValue(e.target.value)}
-              placeholder="Full Name"
+              onChange={(e) => {
+                let val = e.target.value;
+                // Split by spaces and filter
+                const words = val.split(' ').filter(w => w.length > 0);
+                // Limit each word to 8 characters
+                const limitedWords = words.map(w => w.slice(0, 8));
+                // Take only first 2 words
+                const finalWords = limitedWords.slice(0, 2);
+                // Allow trailing space only if we have less than 2 words
+                const hasTrailingSpace = val.endsWith(' ') && finalWords.length < 2;
+                setNameValue(finalWords.join(' ') + (hasTrailingSpace ? ' ' : ''));
+              }}
+              placeholder="First Last"
+              maxLength={17} // 8 + 1 space + 8 = 17
               className="login-input text-center text-lg"
             />
+            <p className="text-xs text-muted text-center mt-2">Max 2 words, 8 letters each</p>
           </div>
           <div style={{ minHeight: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {error && (

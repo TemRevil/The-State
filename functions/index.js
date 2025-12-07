@@ -29,11 +29,11 @@ function fillTimeGaps(rawPoints, startTime, endTime, stepSeconds) {
     let value = 0;
     // Look for data point within half a step
     for (const [key, val] of rawMap.entries()) {
-        if (Math.abs(key - t) < stepSeconds / 2) {
-            value = val;
-            rawMap.delete(key);
-            break;
-        }
+      if (Math.abs(key - t) < stepSeconds / 2) {
+        value = val;
+        rawMap.delete(key);
+        break;
+      }
     }
     filledData.push({ timestamp: t * 1000, value: value });
   }
@@ -81,27 +81,27 @@ exports.getFirebaseUsage = functions.https.onCall(async (data, context) => {
   const { mode = '24h' } = data || {};
   const now = new Date();
   const endTimeSeconds = Math.floor(now.getTime() / 1000);
-  
+
   // --- PACIFIC TIME HELPER ---
   // Returns the timestamp (seconds) for Midnight Pacific Time today
   const getPacificMidnight = () => {
-     // 1. Get current time in Pacific as a string
-     const pacificDateStr = new Date().toLocaleString("en-US", {timeZone: "America/Los_Angeles"});
-     // 2. Create a Date object from that string 
-     const pDate = new Date(pacificDateStr);
-     // 3. Set to midnight
-     pDate.setHours(0,0,0,0);
-     // 4. Return timestamp
-     return Math.floor(pDate.getTime() / 1000);
+    // 1. Get current time in Pacific as a string
+    const pacificDateStr = new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+    // 2. Create a Date object from that string 
+    const pDate = new Date(pacificDateStr);
+    // 3. Set to midnight
+    pDate.setHours(0, 0, 0, 0);
+    // 4. Return timestamp
+    return Math.floor(pDate.getTime() / 1000);
   };
 
   // Returns the timestamp (seconds) for the 1st of the month Pacific Time
   const getPacificMonthStart = () => {
-     const pacificDateStr = new Date().toLocaleString("en-US", {timeZone: "America/Los_Angeles"});
-     const pDate = new Date(pacificDateStr);
-     pDate.setDate(1);
-     pDate.setHours(0,0,0,0);
-     return Math.floor(pDate.getTime() / 1000);
+    const pacificDateStr = new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+    const pDate = new Date(pacificDateStr);
+    pDate.setDate(1);
+    pDate.setHours(0, 0, 0, 0);
+    return Math.floor(pDate.getTime() / 1000);
   }
 
   let startTimeSeconds;
@@ -110,37 +110,37 @@ exports.getFirebaseUsage = functions.https.onCall(async (data, context) => {
   // --- MODE LOGIC ---
   switch (mode) {
     case 'quota':
-        // Start exactly at Pacific Midnight today
-        startTimeSeconds = getPacificMidnight();
-        alignmentSeconds = 3600; // Hourly data points
-        break;
+      // Start exactly at Pacific Midnight today
+      startTimeSeconds = getPacificMidnight();
+      alignmentSeconds = 3600; // Hourly data points
+      break;
 
     case 'billing':
-        // Start at 1st of the month (Pacific)
-        startTimeSeconds = getPacificMonthStart();
-        alignmentSeconds = 86400; // Daily data points
-        break;
+      // Start at 1st of the month (Pacific)
+      startTimeSeconds = getPacificMonthStart();
+      alignmentSeconds = 86400; // Daily data points
+      break;
 
     case '7d':
-        startTimeSeconds = endTimeSeconds - (7 * 24 * 3600);
-        alignmentSeconds = 86400; // Daily
-        break;
+      startTimeSeconds = endTimeSeconds - (7 * 24 * 3600);
+      alignmentSeconds = 86400; // Daily
+      break;
 
     case '30d':
-        startTimeSeconds = endTimeSeconds - (30 * 24 * 3600);
-        alignmentSeconds = 86400; // Daily
-        break;
+      startTimeSeconds = endTimeSeconds - (30 * 24 * 3600);
+      alignmentSeconds = 86400; // Daily
+      break;
 
     case '24h':
     default:
-        startTimeSeconds = endTimeSeconds - (24 * 3600);
-        alignmentSeconds = 3600; // Hourly
-        break;
+      startTimeSeconds = endTimeSeconds - (24 * 3600);
+      alignmentSeconds = 3600; // Hourly
+      break;
   }
 
   // Safety: Ensure start is not in future
   if (startTimeSeconds >= endTimeSeconds) {
-      startTimeSeconds = endTimeSeconds - 3600; 
+    startTimeSeconds = endTimeSeconds - 3600;
   }
 
   // Get Storage Snapshot (Static)
@@ -149,7 +149,7 @@ exports.getFirebaseUsage = functions.https.onCall(async (data, context) => {
   try {
     const bucket = admin.storage().bucket();
     // Note: getFiles() can be slow if you have thousands of files.
-    const [files] = await bucket.getFiles(); 
+    const [files] = await bucket.getFiles();
     fileCount = files.length;
     files.forEach(file => {
       totalBytesStored += parseInt(file.metadata.size || '0');
@@ -188,7 +188,8 @@ exports.getFirebaseUsage = functions.https.onCall(async (data, context) => {
       }
     };
   } catch (error) {
-    console.error('Error in getFirebaseUsage:', error);
-    throw new functions.https.HttpsError('internal', error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error in getFirebaseUsage:', errorMessage, error);
+    throw new functions.https.HttpsError('internal', errorMessage || 'Unknown error occurred');
   }
 });

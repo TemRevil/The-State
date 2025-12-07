@@ -18,7 +18,7 @@ interface PDFViewerProps {
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, onViolation, canDownload }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
+
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -55,7 +55,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
           onViolation();
         }
       }
-      
+
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = true;
         volumeButtonPressTime = Date.now();
@@ -74,14 +74,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen') onViolation();
-      
+
       if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
         volumeUpPressed = false;
         if (Date.now() - volumeButtonPressTime > 200 && volumeDownPressed) {
           onViolation();
         }
       }
-      
+
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = false;
         if (Date.now() - volumeButtonPressTime > 200 && volumeUpPressed) {
@@ -190,22 +190,22 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       if (!canvasElement) return;
 
       const page = await pdfDoc.getPage(pageNum);
-      
+
       // Get device pixel ratio for high-DPI displays
       const devicePixelRatio = window.devicePixelRatio || 1;
       // Use a quality multiplier (2x) for extra sharpness
       const qualityMultiplier = 2;
-      
+
       // Calculate display viewport (what user sees)
       const displayViewport = page.getViewport({ scale: zoom });
       // Calculate render viewport (high resolution for quality)
       const renderScale = zoom * devicePixelRatio * qualityMultiplier;
       const renderViewport = page.getViewport({ scale: renderScale });
-      
+
       // Set canvas internal size to high resolution
       canvasElement.width = renderViewport.width;
       canvasElement.height = renderViewport.height;
-      
+
       // Set canvas display size (CSS size) to match zoom level
       canvasElement.style.width = `${displayViewport.width}px`;
       canvasElement.style.height = `${displayViewport.height}px`;
@@ -341,23 +341,23 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       {violation ? (
         <div className="modal-content modal-md p-8 flex flex-col items-center text-center border border-error/50 relative overflow-hidden bg-[#09090b] shadow-[0_0_50px_rgba(239,68,68,0.2)]">
           <div className="absolute inset-0 bg-red-900/10 animate-pulse pointer-events-none"></div>
-          
+
           <div className="relative w-24 h-24 rounded-full bg-error/10 flex items-center justify-center mb-6 text-error shadow-[0_0_30px_rgba(239,68,68,0.3)] animate-bounce">
             <AlertCircle size={48} />
           </div>
-          
+
           <h2 className="relative text-3xl font-bold text-white mb-2 tracking-tight">Security Alert</h2>
           <p className="relative text-error font-bold text-lg mb-6 uppercase tracking-widest">Screenshot Detected</p>
-          
+
           <div className="relative bg-white/5 border border-white/10 rounded-lg p-4 mb-8 w-full">
             <p className="text-muted text-sm leading-relaxed">
               A security violation has been logged against your ID <strong>{localStorage.getItem("Number")}</strong>.
-              <br/><br/>
+              <br /><br />
               This incident has been reported to the administrator. Repeated violations will result in an immediate permanent ban.
             </p>
           </div>
-          
-          <button 
+
+          <button
             onClick={onClose}
             className="relative btn btn-danger w-full justify-center font-bold"
           >
@@ -367,33 +367,39 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
       ) : (
         <div className="modal-content modal-xl relative flex flex-col h-[90vh]">
           {/* Header */}
-          <div className="flex items-center justify-between px-10 py-5 border-b border-white/10 bg-app-surface/30 backdrop-blur-lg z-10 shrink-0">
-            <div className="flex items-center gap-4 flex-1 min-w-0">
-              <div className="p-2.5 bg-primary/10 rounded-lg text-primary shrink-0">
-                <FileText size={20} />
+          <div className={`flex items-center justify-between border-b border-white/10 bg-app-surface/30 backdrop-blur-lg z-10 shrink-0 ${isMobile ? 'px-3 py-3 gap-2' : 'px-10 py-5'}`}>
+            <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+              <div className={`bg-primary/10 rounded-lg text-primary shrink-0 ${isMobile ? 'p-1.5' : 'p-2.5'}`}>
+                <FileText size={isMobile ? 16 : 20} />
               </div>
-              <div className="flex flex-col min-w-0">
-                <h3 className="font-semibold text-white truncate leading-tight" title={pdf.name}>{pdf.name}</h3>
-                <p className="text-xs text-muted truncate">{pdf.size} - {pdf.date}</p>
+              <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+                <h3
+                  className={`font-semibold text-white leading-tight overflow-hidden text-ellipsis whitespace-nowrap ${isMobile ? 'text-sm' : ''}`}
+                  title={pdf.name}
+                  style={{ maxWidth: '100%' }}
+                >
+                  {pdf.name}
+                </h3>
+                {!isMobile && <p className="text-xs text-muted truncate">{pdf.size} - {pdf.date}</p>}
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {canDownload && (
-                <button 
-                  onClick={handleDownload} 
+                <button
+                  onClick={handleDownload}
                   disabled={loading || downloadLoading}
-                  className="btn btn-sm btn-ghost disabled:opacity-50 disabled:cursor-not-allowed group"
+                  className={`btn btn-ghost disabled:opacity-50 disabled:cursor-not-allowed group ${isMobile ? 'btn-xs p-1.5' : 'btn-sm'}`}
                   title="Download PDF"
                 >
                   {downloadLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
+                    <Loader2 size={isMobile ? 16 : 18} className="animate-spin" />
                   ) : (
-                    <Download size={18} className="text-muted group-hover:text-primary transition-colors" />
+                    <Download size={isMobile ? 16 : 18} className="text-muted group-hover:text-primary transition-colors" />
                   )}
                 </button>
               )}
-              <button onClick={onClose} className="btn btn-sm btn-ghost group" title="Close">
-                <X size={18} className="text-muted group-hover:text-white transition-colors" />
+              <button onClick={onClose} className={`btn btn-ghost group ${isMobile ? 'btn-xs p-1.5' : 'btn-sm'}`} title="Close">
+                <X size={isMobile ? 16 : 18} className="text-muted group-hover:text-white transition-colors" />
               </button>
             </div>
           </div>

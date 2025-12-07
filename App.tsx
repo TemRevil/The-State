@@ -4,9 +4,10 @@ import { LoginPage } from './components/LoginPage';
 import { MainPage } from './components/MainPage';
 import { AdminDashboard } from './components/AdminDashboard';
 import { UsageToast } from './components/UsageToast';
+import { ScreenshotGuard } from './components/ScreenshotGuard';
 import { auth, db, functions } from './firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { ShieldAlert } from 'lucide-react';
 
 // Enable/disable limits for testing
@@ -142,10 +143,47 @@ const App: React.FC = () => {
     }
   }, [limitsExceeded]);
 
-  const checkLimits = async () => {
+
+  const checkLimits = async (retryCount = 0): Promise<void> => {
+    const MAX_RETRIES = 3;
+    const TIMEOUT_MS = 15000;
+
     try {
+      // First, check if there's a manual shutdown flag in Firestore (fallback)
+      try {
+        const shutdownDoc = await getDoc(doc(db, 'config', 'shutdown'));
+        if (shutdownDoc.exists()) {
+          const shutdownData = shutdownDoc.data();
+          if (shutdownData?.shutdown === true) {
+            console.log('Shutdown flag found in Firestore');
+            setLimitsExceeded({
+              exceeded: true,
+              reason: shutdownData.reason || 'Service temporarily unavailable',
+              resetType: shutdownData.resetType || 'daily-pacific',
+              usage: shutdownData.usage,
+              limit: shutdownData.limit
+            });
+            return;
+          }
+        }
+      } catch (firestoreError) {
+        console.warn('Could not check shutdown document:', firestoreError);
+      }
+
       const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-      const result = await getUsage({ mode: '30d' });
+
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('TIMEOUT: Cloud Function did not respond. This usually means you need to upgrade to Firebase Blaze plan.'));
+        }, TIMEOUT_MS);
+      });
+
+      const result = await Promise.race([
+        getUsage({ mode: '30d' }),
+        timeoutPromise
+      ]) as any;
+
       const data = result.data as any;
 
       if (!data || !data.firestore || !data.storage) {
@@ -196,7 +234,6 @@ const App: React.FC = () => {
 
       if (limitExceeded) {
         setLimitsExceeded({ exceeded: true, reason, resetType, usage, limit });
-        // Only write to shutdown if it's a new shutdown event to save writes
         await setDoc(doc(db, 'config', 'shutdown'), {
           shutdown: true,
           reason: reason,
@@ -208,11 +245,41 @@ const App: React.FC = () => {
         });
       } else {
         setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
-        // Clear shutdown flag to restore access
         await setDoc(doc(db, 'config', 'shutdown'), { shutdown: false });
       }
     } catch (error) {
-      console.error('Error checking limits:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`Limits check failed (attempt ${retryCount + 1}/${MAX_RETRIES}):`, errorMessage);
+
+      // Retry logic
+      if (retryCount < MAX_RETRIES - 1) {
+        console.log(`Retrying in 3 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        return checkLimits(retryCount + 1);
+      }
+
+      // After all retries failed, check Firestore shutdown doc as fallback
+      try {
+        const shutdownDoc = await getDoc(doc(db, 'config', 'shutdown'));
+        if (shutdownDoc.exists() && shutdownDoc.data()?.shutdown === true) {
+          const data = shutdownDoc.data();
+          setLimitsExceeded({
+            exceeded: true,
+            reason: data.reason || 'Limits exceeded',
+            resetType: data.resetType || 'daily-pacific',
+            usage: data.usage,
+            limit: data.limit
+          });
+          return;
+        }
+      } catch {
+        // Firestore fallback also failed
+      }
+
+      // All methods failed - allow app to work but log the issue
+      console.warn('=== IMPORTANT: All limit checking methods failed ===');
+      console.warn('If you are on Firebase Spark (free) plan, upgrade to Blaze to use Cloud Functions with external API calls.');
+      console.warn('The getFirebaseUsage function requires @google-cloud/monitoring which makes outbound network requests.');
       setLimitsExceeded({ exceeded: false, reason: '', resetType: 'daily-pacific' });
     }
   };
@@ -323,27 +390,29 @@ const App: React.FC = () => {
   }
 
   return (
-    <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans" style={{ backdropFilter: 'blur(12px)' }}>
-      <UsageToast />
-      <div className="bg-gradient-radial"></div>
-      <div className="bg-orb-1"></div>
-      <div className="bg-orb-2"></div>
-      <div className="relative z-10 w-full h-full">
-        {currentView === 'login' ? (
-          <div className="flex items-center justify-center h-full p-4">
-            <LoginPage onLoginSuccess={handleLoginSuccess} />
-          </div>
-        ) : currentView === 'dashboard' ? (
-          <MainPage
-            onLogout={handleLogout}
-            onNavigateAdmin={() => setCurrentView('admin')}
-            isAdmin={isAdmin}
-          />
-        ) : (
-          <AdminDashboard onBack={() => setCurrentView('dashboard')} />
-        )}
-      </div>
-    </main>
+    <ScreenshotGuard enabled={true} warningDuration={3000}>
+      <main className="relative h-screen w-full flex overflow-hidden bg-app-base text-white font-sans" style={{ backdropFilter: 'blur(12px)' }}>
+        <UsageToast />
+        <div className="bg-gradient-radial"></div>
+        <div className="bg-orb-1"></div>
+        <div className="bg-orb-2"></div>
+        <div className="relative z-10 w-full h-full">
+          {currentView === 'login' ? (
+            <div className="flex items-center justify-center h-full p-4">
+              <LoginPage onLoginSuccess={handleLoginSuccess} />
+            </div>
+          ) : currentView === 'dashboard' ? (
+            <MainPage
+              onLogout={handleLogout}
+              onNavigateAdmin={() => setCurrentView('admin')}
+              isAdmin={isAdmin}
+            />
+          ) : (
+            <AdminDashboard onBack={() => setCurrentView('dashboard')} />
+          )}
+        </div>
+      </main>
+    </ScreenshotGuard>
   );
 };
 

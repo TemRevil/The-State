@@ -657,15 +657,13 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
         </div>
 
         <div className="p-8 border-t border-white/10 mt-auto">
-          {!isMobile && (
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface/50 mb-3 border border-white/5">
-              <div className="rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold" style={{ width: '32px', height: '32px' }}>{userName.charAt(0).toUpperCase()}</div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{userName}</p>
-                <p className="text-xs text-success">Connected</p>
-              </div>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface/50 mb-3 border border-white/5">
+            <div className="rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold" style={{ width: '32px', height: '32px' }}>{userName.charAt(0).toUpperCase()}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white truncate">{userName}</p>
+              <p className="text-xs text-success">Connected</p>
             </div>
-          )}
+          </div>
           <button onClick={() => setShowAdminLogin(true)} className="nav-btn mb-1"> <ShieldCheck size={16} /> Management </button>
           <button onClick={onLogout} className="nav-btn mb-1"> <LogOut size={16} /> Logout </button>
         </div>

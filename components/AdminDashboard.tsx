@@ -30,10 +30,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
   const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  
+
   // --- NUMBERS DATA STATE ---
   const [numbers, setNumbers] = useState<NumberData[]>([]);
-  
+
   const [blocked, setBlocked] = useState<BlockedData[]>([]);
   const [snitches, setSnitches] = useState<SnitchData[]>([]);
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -138,7 +138,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         // --- SEARCH MODE ---
         // Search directly in Firestore using prefixes to avoid high reads.
         // We only fetch 20 at a time, even for search results.
-        
+
         const term = debouncedSearchTerm.trim();
         const isNumeric = /^\d+$/.test(term);
 
@@ -146,11 +146,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           // Search by ID (Number)
           // Note: When using 'where' on __name__, orderBy must also be __name__
           q = query(
-             collectionRef, 
-             where('__name__', '>=', term),
-             where('__name__', '<=', term + '\uf8ff'),
-             orderBy('__name__'), // Mandatory sort for this where clause
-             limit(numbersPageSize)
+            collectionRef,
+            where('__name__', '>=', term),
+            where('__name__', '<=', term + '\uf8ff'),
+            orderBy('__name__'), // Mandatory sort for this where clause
+            limit(numbersPageSize)
           );
         } else {
           // Search by Name
@@ -166,13 +166,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
         // Handle pagination for search results
         if (isLoadMore && numbersLastDoc) {
-           q = query(q, startAfter(numbersLastDoc));
+          q = query(q, startAfter(numbersLastDoc));
         }
 
       } else {
         // --- DEFAULT MODE ---
         // Efficient Sort & Pagination
-        
+
         let firestoreOrderBy: any = orderBy('__name__', sortDirection); // Default
 
         if (sortField === 'name') firestoreOrderBy = orderBy('Name', sortDirection);
@@ -180,12 +180,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         else if (sortField === 'screened') firestoreOrderBy = orderBy('Screened', sortDirection);
 
         if (!isLoadMore) {
-           q = query(collectionRef, firestoreOrderBy, limit(numbersPageSize));
+          q = query(collectionRef, firestoreOrderBy, limit(numbersPageSize));
         } else if (numbersLastDoc) {
-           q = query(collectionRef, firestoreOrderBy, startAfter(numbersLastDoc), limit(numbersPageSize));
+          q = query(collectionRef, firestoreOrderBy, startAfter(numbersLastDoc), limit(numbersPageSize));
         } else {
-           setNumbersLoadingMore(false);
-           return; 
+          setNumbersLoadingMore(false);
+          return;
         }
       }
 
@@ -200,9 +200,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
       // Update cursor for infinite scroll
       if (snapshot.docs.length > 0) {
-         setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+        setNumbersLastDoc(snapshot.docs[snapshot.docs.length - 1]);
       }
-      
+
       // If we got fewer docs than the limit, we've reached the end
       setNumbersHasMore(snapshot.docs.length === numbersPageSize);
 
@@ -219,10 +219,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     setNumbers([]);
     setNumbersLastDoc(null);
     setNumbersHasMore(true);
-    
+
     // Load fresh data
     loadNumbers(false);
-    
+
     // Scroll to top
     if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
   }, [debouncedSearchTerm, sortField, sortDirection]);
@@ -251,7 +251,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     // For this implementation, we allow changing the sort state, which triggers a reload.
     // Note: If searching, loadNumbers logic overrides sortField to match the search query (Name or ID)
     // to keep reads low.
-    
+
     if (sortField === field) {
       if (sortDirection === 'asc') setSortDirection('desc');
       else if (sortDirection === 'desc') {
@@ -442,11 +442,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   // --- FIREBASE USAGE LOGIC ---
   useEffect(() => {
     if (activeSection === 'firebase') {
-      const fetchUsage = async () => {
+      const fetchUsage = async (retryCount = 0) => {
+        const MAX_RETRIES = 3;
+        const TIMEOUT_MS = 20000;
+
         setLoadingUsage(true);
         try {
           const getUsage = httpsCallable(functions, 'getFirebaseUsage');
-          const result = await getUsage({ mode: usageViewMode });
+
+          // Add timeout to prevent hanging
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error('TIMEOUT: Cloud Function did not respond. Upgrade to Firebase Blaze plan for external API calls.'));
+            }, TIMEOUT_MS);
+          });
+
+          const result = await Promise.race([
+            getUsage({ mode: usageViewMode }),
+            timeoutPromise
+          ]) as any;
+
           const data = result.data as any;
           const shouldAccumulate = usageViewMode === 'quota' || usageViewMode === 'billing';
           const processSeries = (series: any[]) => {
@@ -459,10 +474,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           if (data?.storage) { data.storage.bandwidth.data = processSeries(data.storage.bandwidth.data); data.storage.requests.data = processSeries(data.storage.requests.data); }
           setFirebaseUsage(data);
           setLastUpdated(new Date());
-        } catch (error) { console.error('Failed to fetch Firebase usage:', error); } finally { setLoadingUsage(false); }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.error(`Failed to fetch Firebase usage (attempt ${retryCount + 1}/${MAX_RETRIES}):`, errorMessage);
+
+          // Retry logic
+          if (retryCount < MAX_RETRIES - 1) {
+            console.log('Retrying in 5 seconds...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            return fetchUsage(retryCount + 1);
+          }
+
+          console.warn('=== FIREBASE USAGE FETCH FAILED ===');
+          console.warn('If you are on Firebase Spark (free) plan, upgrade to Blaze.');
+          console.warn('Cloud Functions on Spark plan cannot make external network requests.');
+        } finally {
+          setLoadingUsage(false);
+        }
       };
       fetchUsage();
-      const interval = setInterval(fetchUsage, 5 * 60 * 1000);
+      const interval = setInterval(() => fetchUsage(), 5 * 60 * 1000);
       return () => clearInterval(interval);
     }
   }, [activeSection, usageViewMode]);
@@ -472,18 +503,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       {/* SIDEBAR */}
-      <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''} p-4`}>
+      <aside className={`sidebar z-20 shadow-xl ${sidebarOpen ? 'mobile-open' : ''} p-4`} style={{ maxHeight: '100dvh' }}>
         <div className="sidebar-header gap-3">
           <div className="rounded border border-indigo-900/50 flex items-center justify-center text-indigo-500 bg-indigo-500/10" style={{ width: '32px', height: '32px' }}><ShieldAlert size={18} /></div>
           <div><h1 className="font-bold text-white text-sm">The State</h1></div>
         </div>
-        <nav className="flex-1 flex flex-col gap-2 mt-4">
-          <button onClick={() => setActiveSection('tables')} className={`nav-btn admin-nav-btn ${activeSection === 'tables' ? 'active' : ''}`}><LayoutGrid size={18} /> Tables</button>
-          <button onClick={() => setActiveSection('files')} className={`nav-btn admin-nav-btn ${activeSection === 'files' ? 'active' : ''}`}><FolderOpen size={18} /> Files</button>
-          <button onClick={() => setActiveSection('shots')} className={`nav-btn admin-nav-btn ${activeSection === 'shots' ? 'active' : ''}`}><Camera size={18} /> Shots</button>
-          <button onClick={() => setActiveSection('firebase')} className={`nav-btn admin-nav-btn ${activeSection === 'firebase' ? 'active' : ''}`}><Database size={18} /> Firebase</button>
+        <nav className="flex-1 flex flex-col gap-2 mt-4 overflow-y-auto" style={{ minHeight: 0 }}>
+          <button onClick={() => { setActiveSection('tables'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'tables' ? 'active' : ''}`}><LayoutGrid size={18} /> Tables</button>
+          <button onClick={() => { setActiveSection('files'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'files' ? 'active' : ''}`}><FolderOpen size={18} /> Files</button>
+          <button onClick={() => { setActiveSection('shots'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'shots' ? 'active' : ''}`}><Camera size={18} /> Shots</button>
+          <button onClick={() => { setActiveSection('firebase'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'firebase' ? 'active' : ''}`}><Database size={18} /> Firebase</button>
         </nav>
-        <div className="border-t border-white/10 flex flex-col gap-2 mt-4 pt-4">
+        <div className="border-t border-white/10 flex flex-col gap-2 pt-4 mt-auto shrink-0">
+          {/* Admin User Info */}
+          <div className="flex items-center gap-3 px-2 py-2 mb-2">
+            <div className="rounded-full bg-surface border border-white/10 flex items-center justify-center text-muted font-bold text-xs shrink-0" style={{ width: '32px', height: '32px' }}>
+              {adminName.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-medium text-white truncate">{adminName}</span>
+              <span className="text-xs text-success">Admin</span>
+            </div>
+          </div>
           <button onClick={onBack} className="nav-btn"><ArrowLeft size={16} /> Back to User View</button>
           <button onClick={handleLogout} className="nav-btn hover:text-error hover:bg-red-500/10"><LogOut size={16} /> Sign Out</button>
         </div>
@@ -657,7 +698,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         </tr>
                       )}
                       {activeTableTab === 'numbers' && !numbersLoadingMore && numbers.length === 0 && (
-                         <tr><td colSpan={7} className="text-center py-10 text-muted">No users found.</td></tr>
+                        <tr><td colSpan={7} className="text-center py-10 text-muted">No users found.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -666,28 +707,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               </div>
             </div>
           )}
-          
+
           {/* Files, Shots, Firebase Sections (Same as original, abbreviated for brevity) */}
           {activeSection === 'files' && (
-             // ... existing file section code ...
-             <div className="h-full flex flex-col gap-4">
-               {/* Same structure as before, just placeholder here to keep code block valid */}
-               <div className="flex items-center justify-between">
-                 {/* ... header ... */}
-                 <div className="flex items-center gap-2">
-                   <button onClick={handleNavigateBack} disabled={pathHistory.length === 0} className={`btn-icon border border-white/10 bg-surface ${pathHistory.length === 0 ? 'opacity-50' : ''}`}><ArrowLeft size={16} /></button>
-                   <div className="flex items-center bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-muted font-mono"><span onClick={() => { setCurrentPath(''); setPathHistory([]); }} className="cursor-pointer hover:text-white">root/</span>{currentPath}</div>
-                 </div>
-                 <div className="flex items-center gap-2">
-                   {selectedFiles.length > 0 && <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>}
-                   <div className="view-toggle-group mr-2"><button onClick={() => setFileViewMode('grid')} className={`view-toggle-btn ${fileViewMode === 'grid' ? 'active' : ''}`}><LayoutGrid size={16} /></button><button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button></div>
-                   <button onClick={() => setShowFolderModal(true)} className="btn btn-secondary btn-toolbar"><FolderOpen size={16} /> New Folder</button>
-                   <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
-                 </div>
-               </div>
-               <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                  {/* File display logic (same as original) */}
-                  <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
+            // ... existing file section code ...
+            <div className="h-full flex flex-col gap-4">
+              {/* Same structure as before, just placeholder here to keep code block valid */}
+              <div className="flex items-center justify-between">
+                {/* ... header ... */}
+                <div className="flex items-center gap-2">
+                  <button onClick={handleNavigateBack} disabled={pathHistory.length === 0} className={`btn-icon border border-white/10 bg-surface ${pathHistory.length === 0 ? 'opacity-50' : ''}`}><ArrowLeft size={16} /></button>
+                  <div className="flex items-center bg-surface border border-white/10 rounded-lg px-3 py-2 text-sm text-muted font-mono"><span onClick={() => { setCurrentPath(''); setPathHistory([]); }} className="cursor-pointer hover:text-white">root/</span>{currentPath}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedFiles.length > 0 && <button onClick={handleBulkFileDelete} className="btn btn-danger btn-toolbar animate-fade-in"><Trash2 size={16} /> Delete ({selectedFiles.length})</button>}
+                  <div className="view-toggle-group mr-2"><button onClick={() => setFileViewMode('grid')} className={`view-toggle-btn ${fileViewMode === 'grid' ? 'active' : ''}`}><LayoutGrid size={16} /></button><button onClick={() => setFileViewMode('table')} className={`view-toggle-btn ${fileViewMode === 'table' ? 'active' : ''}`}><List size={16} /></button></div>
+                  <button onClick={() => setShowFolderModal(true)} className="btn btn-secondary btn-toolbar"><FolderOpen size={16} /> New Folder</button>
+                  <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
+                </div>
+              </div>
+              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+                {/* File display logic (same as original) */}
+                <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
                   {fileViewMode === 'grid' ? (
                     <div className="file-grid-layout">
                       {files.map(file => {
@@ -732,15 +773,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </div>
                   )}
                 </div>
-               </div>
-             </div>
+              </div>
+            </div>
           )}
 
           {activeSection === 'shots' && (
-             // ... existing shots code ...
-             <div className="h-full flex flex-col gap-4">
-                <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+            // ... existing shots code ...
+            <div className="h-full flex flex-col gap-4">
+              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
                   {shots.length > 0 ? (
                     <div className="w-full max-w-4xl flex flex-col gap-4" style={{ height: '100%' }}>
                       <div className={`relative bg-black rounded-xl border border-white/10 overflow-hidden shadow-2xl flex items-center justify-center ${isMobile ? 'w-full h-full' : 'aspect-video'}`} style={isMobile ? { width: '100%', height: '100vh' } : { width: '100%', height: '100%' }}>
@@ -752,9 +793,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   ) : (
                     <div className="text-muted flex flex-col items-center gap-4"><Camera size={48} className="opacity-20" /><p>No screenshots captured</p></div>
                   )}
-                  </div>
                 </div>
-                {shots.length > 0 && (
+              </div>
+              {shots.length > 0 && (
                 <div className={`flex justify-between items-center bg-surface rounded-xl border border-white/10 ${isMobile ? 'p-2 flex-col gap-2' : 'p-4'}`}>
                   <div>
                     <div className={`font-mono text-muted ${isMobile ? 'text-xs' : 'text-sm'}`}>{shots[currentShotIndex]?.name}</div>
@@ -766,7 +807,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   </div>
                 </div>
               )}
-             </div>
+            </div>
           )}
 
           {activeSection === 'firebase' && (
