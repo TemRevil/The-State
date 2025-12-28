@@ -8,7 +8,8 @@
     "build": "tsc && node ./node_modules/vite/bin/vite.js build",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "read-quizi": "node ./scripts/read_quizi.cjs"
   },
   "dependencies": {
     "firebase": "^10.14.1",

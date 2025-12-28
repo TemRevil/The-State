@@ -18,6 +18,8 @@ interface QuizQuestion {
   choices: string[];
   correct_answer: string;
   explanation?: string;
+  translationQuestion?: string;
+  translationChoices?: string[];
 }
 
 export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, isAdmin }) => {
@@ -57,6 +59,10 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [timerActive, setTimerActive] = useState(false);
   const [quizFinished, setQuizFinished] = useState(false);
   const [loadingQuiz, setLoadingQuiz] = useState(false);
+  const [showPeriodicAnswerModal, setShowPeriodicAnswerModal] = useState(false);
+  const [periodicAnswerIndex, setPeriodicAnswerIndex] = useState<number | null>(null);
+  const [blockSummaries, setBlockSummaries] = useState<Array<{ start: number; end: number; correct: number; total: number; questions: QuizQuestion[]; answers: (string | null)[] }>>([]);
+  const [questionTranslationEnabled, setQuestionTranslationEnabled] = useState<Set<number>>(new Set());
 
   // Quiz Configuration
   const [quizTimerMinutes, setQuizTimerMinutes] = useState<number | null>(5); // null = no timer
@@ -118,8 +124,16 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
     const fetchLectureTypes = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "quizi"));
-        setLectureTypes(querySnapshot.docs.map(doc => doc.id));
+        // Try new collection name first, then fall back to the old one
+        let querySnapshot = await getDocs(collection(db, "quizzes"));
+        console.debug('fetchLectureTypes: quizzes snapshot size', querySnapshot?.size);
+        if (!querySnapshot || querySnapshot.size === 0) {
+          querySnapshot = await getDocs(collection(db, "quizi"));
+          console.debug('fetchLectureTypes: quizi snapshot size', querySnapshot?.size);
+        }
+        const ids = querySnapshot.docs.map(doc => doc.id);
+        console.debug('fetchLectureTypes: lecture ids', ids);
+        setLectureTypes(ids);
       } catch (e) {
         console.error("Failed to fetch lecture types", e);
       }
@@ -420,13 +434,27 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const loadQuizMaps = async (quizType: string) => {
     setLoadingQuiz(true);
     try {
-      const docSnap = await getDoc(doc(db, "quizi", quizType));
+      // Try new collection name then fallback to old name
+      let docSnap = await getDoc(doc(db, "quizzes", quizType));
+      console.debug(`loadQuizMaps: tried quizzes/${quizType}`, !!docSnap?.exists());
+      if (!docSnap.exists()) {
+        docSnap = await getDoc(doc(db, "quizi", quizType));
+        console.debug(`loadQuizMaps: tried quizi/${quizType}`, !!docSnap?.exists());
+      }
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const maps = Object.keys(data).map(key => ({
-          id: key,
-          data: data[key]
-        }));
+        let maps: any[] = [];
+
+        // If the document contains a `quizzes` array (new format), treat it as a single section
+        if (Array.isArray(data.quizzes)) {
+          maps = [{ id: 'all', data: { quiz: data.quizzes } }];
+          console.debug('loadQuizMaps: using quizzes array, count=', data.quizzes.length);
+        } else {
+          // Fallback to previous map-per-key format
+          maps = Object.keys(data).map(key => ({ id: key, data: data[key] }));
+          console.debug('loadQuizMaps: using map-per-key format, maps=', maps.length);
+        }
+
         setQuizMaps(maps);
         setSelectedQuizType(quizType);
         setSelectedMaps(new Set());
@@ -450,48 +478,69 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     setSelectedMaps(newSelected);
   };
 
-  const startQuizSession = async () => {
-    if (selectedMaps.size === 0) {
+  const startQuizSession = async (mapsToUse?: Set<number>) => {
+    const useMaps = mapsToUse ?? selectedMaps;
+    if (!useMaps || useMaps.size === 0) {
       alert("Please select at least one section");
       return;
     }
 
     let allQuestions: QuizQuestion[] = [];
-    selectedMaps.forEach(mapIndex => {
+    useMaps.forEach(mapIndex => {
       const map = quizMaps[mapIndex];
       if (map && map.data && map.data.quiz) {
         allQuestions = [...allQuestions, ...map.data.quiz];
       }
     });
+    console.debug('startQuizSession: collected raw questions count=', allQuestions.length, 'useMaps=', Array.from(useMaps));
+    if (allQuestions.length > 0) console.debug('startQuizSession: sample raw question', allQuestions[0]);
 
     if (allQuestions.length === 0) {
       alert("No questions found in selected sections");
       return;
     }
 
-    // Shuffle questions
-    allQuestions = allQuestions.sort(() => Math.random() - 0.5);
+    // Normalize raw question objects coming from Firestore, remove duplicates,
+    // shuffle questions and shuffle choices. Use ALL questions (no limits).
+    const normalized: QuizQuestion[] = [];
+    const seenKeys = new Set<string | number>();
+    useMaps.forEach(mapIndex => {
+      const map = quizMaps[mapIndex];
+      if (!map || !map.data || !map.data.quiz) return;
+      map.data.quiz.forEach((raw: any) => {
+        const key = raw.id ?? raw._id ?? raw.question ?? JSON.stringify(raw);
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        const translation = raw.translation || null;
 
-    // Limit questions to selected count
-    const limitedQuestions = allQuestions.slice(0, quizQuestionCount);
+        const questionTextRaw: string = raw.question || raw.q || '';
+        const choicesArrRaw: string[] = raw.options || raw.choices || [];
+        const translationQuestion: string | undefined = translation?.question;
+        const translationChoicesArr: string[] | undefined = translation?.options;
+        const correctAns: string = raw.correctAnswer || raw.correct_answer || raw.correct || '';
+        const explanation: string | undefined = raw.explanation || raw.explain;
 
-    // Filter choices for each question
-    const processedQuestions = limitedQuestions.map(q => {
-      if (q.choices.length <= quizChoicesCount) {
-        return q;
-      }
-      // Keep correct answer and randomly select other choices
-      const correctAnswer = q.correct_answer;
-      const otherChoices = q.choices.filter(c => c !== correctAnswer);
-      const shuffledOthers = otherChoices.sort(() => Math.random() - 0.5);
-      const selectedOthers = shuffledOthers.slice(0, quizChoicesCount - 1);
-      const newChoices = [correctAnswer, ...selectedOthers].sort(() => Math.random() - 0.5);
+        // Use only choices provided by Firestore (do not inject the correct answer)
+        const choicesSet = Array.from(new Set(choicesArrRaw.filter(Boolean)));
+        const shuffled = choicesSet.sort(() => Math.random() - 0.5);
 
-      return {
-        ...q,
-        choices: newChoices
-      };
+        const translationChoices = translationChoicesArr ? Array.from(new Set(translationChoicesArr.filter(Boolean))).sort(() => Math.random() - 0.5) : undefined;
+
+        normalized.push({
+          question: questionTextRaw,
+          choices: shuffled,
+          correct_answer: correctAns,
+          explanation,
+          translationQuestion,
+          translationChoices
+        });
+      });
     });
+
+    // Shuffle question order
+    const shuffledQuestions = normalized.sort(() => Math.random() - 0.5);
+
+    const processedQuestions = shuffledQuestions;
 
     setCurrentQuizData(processedQuestions);
     setUserAnswers(new Array(processedQuestions.length).fill(null));
@@ -532,6 +581,20 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       return;
     }
 
+    // if moving forward and the just-answered question is a multiple of 10,
+    // show the periodic answer modal instead of advancing immediately
+    if (direction > 0) {
+      const justAnsweredIndex = currentQuestionIndex;
+      if (((justAnsweredIndex + 1) % 10) === 0) {
+        const s = Math.floor(justAnsweredIndex / 10) * 10;
+        const e = Math.min(s + 9, currentQuizData.length - 1);
+        recordBlockSummary(s, e);
+        setPeriodicAnswerIndex(justAnsweredIndex);
+        setShowPeriodicAnswerModal(true);
+        return;
+      }
+    }
+
     const newIndex = currentQuestionIndex + direction;
     if (newIndex >= 0 && newIndex < currentQuizData.length) {
       setCurrentQuestionIndex(newIndex);
@@ -540,8 +603,49 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     }
   };
 
+  const handlePeriodicContinue = () => {
+    setShowPeriodicAnswerModal(false);
+    const i = periodicAnswerIndex ?? 0;
+    // if this was the last question, finish quiz; otherwise advance
+    if (i >= currentQuizData.length - 1) {
+      finishQuiz();
+    } else {
+      setCurrentQuestionIndex(i + 1);
+    }
+    setPeriodicAnswerIndex(null);
+  };
+
+  const recordBlockSummary = (start: number, end: number) => {
+    // avoid duplicate summaries for same block
+    if (blockSummaries.some(b => b.start === start && b.end === end)) return;
+    const answersSlice = userAnswers.slice(start, end + 1);
+    const questionsSlice = currentQuizData.slice(start, end + 1);
+    let correct = 0;
+    for (let i = 0; i < questionsSlice.length; i++) {
+      if (answersSlice[i] === questionsSlice[i].correct_answer) correct++;
+    }
+    const summary = { start, end, correct, total: questionsSlice.length, questions: questionsSlice, answers: answersSlice };
+    setBlockSummaries(prev => [...prev, summary]);
+  };
+
   const finishQuiz = () => {
     setTimerActive(false);
+    // ensure we have summaries for any remaining blocks not yet recorded
+    const totalBlocks = Math.ceil(currentQuizData.length / 10);
+    for (let b = 0; b < totalBlocks; b++) {
+      const s = b * 10;
+      const e = Math.min(s + 9, currentQuizData.length - 1);
+      if (!blockSummaries.some(bs => bs.start === s && bs.end === e)) {
+        // compute and add
+        const answersSlice = userAnswers.slice(s, e + 1);
+        const questionsSlice = currentQuizData.slice(s, e + 1);
+        let correct = 0;
+        for (let i = 0; i < questionsSlice.length; i++) {
+          if (answersSlice[i] === questionsSlice[i].correct_answer) correct++;
+        }
+        setBlockSummaries(prev => [...prev, { start: s, end: e, correct, total: questionsSlice.length, questions: questionsSlice, answers: answersSlice }]);
+      }
+    }
     setQuizFinished(true);
   };
 
@@ -567,6 +671,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     setQuizTimerMinutes(5);
     setQuizQuestionCount(10);
     setQuizChoicesCount(4);
+    setBlockSummaries([]);
   };
 
   const backToQuizTypes = () => {
@@ -757,52 +862,13 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   <p className="text-sm text-muted mb-4">
                     Choose one or more sections from <span className="text-primary font-medium">{selectedQuizType}</span> to include in this quiz.
                   </p>
-                  <div className="flex flex-col gap-3 mb-6">
-                    {quizMaps.map((map, index) => {
-                      const selected = selectedMaps.has(index);
-                      return (
-                        <label
-                          key={index}
-                          className={`quiz-section-card cursor-pointer transition-all ${selected ? 'selected' : ''}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleMapSelection(index)}
-                            className="hidden"
-                          />
-                          <div className="flex items-center justify-between w-full">
-                            <div className="quiz-section-card-left">
-                              <div className="quiz-section-title">
-                                {selectedQuizType} - {index + 1}
-                              </div>
-                              <div className="quiz-section-sub">
-                                Section {index + 1}
-                              </div>
-                            </div>
-                            <span className="quiz-section-indicator">
-                              {selected ? 'Selected' : `#${index + 1}`}
-                            </span>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  {/* Quiz Configuration */}
-                  <div className="settings-section">
-                    <h4 className="settings-title">Quiz Settings</h4>
-
-                    {/* Timer Selection */}
-                    <div className="form-field">
-                      <label className="form-label">
-                        Timer:{" "}
-                        <span className="text-primary">
-                          {quizTimerMinutes === null || quizTimerMinutes === 0
-                            ? "No timer"
-                            : `${quizTimerMinutes} minute${quizTimerMinutes !== 1 ? "s" : ""}`}
-                        </span>
-                      </label>
+                  <div className="mb-6">
+                    <p className="text-sm text-muted mb-4">
+                      All sections for <span className="text-primary font-medium">{selectedQuizType}</span> will be included by default. You can still go back to the sections list if you need to choose specific sections.
+                    </p>
+                    {/* Timer selection & preview (moved above start buttons) */}
+                    <div className="mb-4">
+                      <label className="form-label">Timer: <span className="text-primary">{quizTimerMinutes === null || quizTimerMinutes === 0 ? 'No timer' : `${quizTimerMinutes} minute${quizTimerMinutes !== 1 ? 's' : ''}`}</span></label>
                       <input
                         type="range"
                         min="0"
@@ -818,54 +884,31 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                         <span>No timer</span>
                         <span>15 min</span>
                       </div>
+                      <p className="text-sm text-muted mt-2">Preview timer: <span className="text-primary font-medium">{quizTimerMinutes === null ? 'No timer' : formatTime(quizTimerMinutes * 60)}</span></p>
                     </div>
 
-                    {/* Question Count */}
-                    <div className="form-field">
-                      <label className="form-label">
-                        Number of Questions: <span className="text-primary">{quizQuestionCount}</span>
-                      </label>
-                      <input
-                        type="range"
-                        min="5"
-                        max="15"
-                        value={quizQuestionCount}
-                        onChange={(e) => setQuizQuestionCount(parseInt(e.target.value))}
-                        className="w-full quiz-range-input"
-                      />
-                      <div className="range-labels">
-                        <span>5</span>
-                        <span>15</span>
-                      </div>
-                    </div>
-
-                    {/* Choices Count */}
-                    <div className="form-field">
-                      <label className="form-label">
-                        Choices per Question:
-                      </label>
-                      <div className="config-toggle-group">
-                        {[3, 4, 5].map((count) => (
-                          <button
-                            key={count}
-                            type="button"
-                            onClick={() => setQuizChoicesCount(count)}
-                            className={`quiz-config-btn ${quizChoicesCount === count ? "active" : ""}`}
-                          >
-                            {count} choices
-                          </button>
-                        ))}
-                      </div>
+                    {/* Translation toggle for specific lecture */}
+                    {/* Per-question translations are available during the quiz; no global toggle here */}
+                    <div className="flex gap-3 mb-4">
+                      <button
+                        onClick={backToQuizTypes}
+                        className="btn bg-white/10 hover:bg-white/20 border border-white/10"
+                      >
+                        Back to Quiz Types
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const allSet = new Set<number>();
+                          quizMaps.forEach((_, i) => allSet.add(i));
+                          setSelectedMaps(allSet);
+                          await startQuizSession(allSet);
+                        }}
+                        className="btn btn-primary"
+                      >
+                        Start Quiz (All sections)
+                      </button>
                     </div>
                   </div>
-
-                  <button
-                    onClick={startQuizSession}
-                    disabled={selectedMaps.size === 0}
-                    className="w-full btn btn-primary h-12 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Start Quiz ({selectedMaps.size} section{selectedMaps.size !== 1 ? 's' : ''} selected)
-                  </button>
                 </div>
               </div>
             )
@@ -883,78 +926,133 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   </p>
                 </div>
 
-                <div className="space-y-4 mb-6">
-                  {currentQuizData.map((q, i) => {
-                    const userAns = userAnswers[i];
-                    const isCorrect = userAns === q.correct_answer;
-                    const dir = getTextDirection(q.question);
+                <div className="space-y-6 mb-6">
+                  {blockSummaries.length > 0 ? (
+                    // Show all block summaries first
+                    blockSummaries
+                      .slice()
+                      .sort((a, b) => a.start - b.start)
+                      .map((block, bi) => (
+                        <div key={bi} className="block-summary p-4 border border-white/5 rounded-lg bg-black/10">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className="text-lg font-bold">Questions {block.start + 1} - {block.end + 1}</h4>
+                              <p className="text-sm text-muted">Score: {block.correct} / {block.total}</p>
+                            </div>
+                          </div>
 
-                    return (
-                      <div
-                        key={i}
-                        className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}
-                      >
-                        <div className="flex items-start gap-3 mb-4">
-                          {isCorrect ? (
-                            <div className="quiz-result-icon-wrapper correct">
-                              <CheckCircle size={24} className="quiz-result-icon correct" />
-                            </div>
-                          ) : (
-                            <div className="quiz-result-icon-wrapper wrong">
-                              <XCircle size={24} className="quiz-result-icon wrong" />
-                            </div>
-                          )}
-                          <p
-                            className="quiz-result-question"
-                            style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
-                          >
-                            {i + 1}. {q.question}
-                          </p>
+                          <div className="space-y-3">
+                            {block.questions.map((q, idx) => {
+                              const globalIndex = block.start + idx;
+                              const userAns = block.answers[idx];
+                              const isCorrect = userAns === q.correct_answer;
+                              const dir = getTextDirection(q.question);
+                              return (
+                                <div key={globalIndex} className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}>
+                                  <div className="flex items-start gap-3 mb-2">
+                                    {isCorrect ? (
+                                      <div className="quiz-result-icon-wrapper correct"><CheckCircle size={20} className="quiz-result-icon correct" /></div>
+                                    ) : (
+                                      <div className="quiz-result-icon-wrapper wrong"><XCircle size={20} className="quiz-result-icon wrong" /></div>
+                                    )}
+                                    <p className="quiz-result-question" style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}>{globalIndex + 1}. {q.question}</p>
+                                  </div>
+                                  <div className="ml-11 space-y-2">
+                                    {userAns ? (
+                                      <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
+                                        <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
+                                        <span className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`} style={{ direction: getTextDirection(userAns) }}>{userAns}</span>
+                                      </div>
+                                    ) : (
+                                      <div className="quiz-answer-box not-answered"><span className="quiz-answer-label not-answered">Not answered</span></div>
+                                    )}
+                                    {!isCorrect && (
+                                      <div className="quiz-answer-box correct">
+                                        <span className="quiz-answer-label correct">Correct answer: </span>
+                                        <span className="quiz-answer-text correct" style={{ direction: getTextDirection(q.correct_answer) }}>{q.correct_answer}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
+                      ))
+                  ) : (
+                    // Fallback: show all questions individually if no block summaries
+                    currentQuizData.map((q, i) => {
+                      const userAns = userAnswers[i];
+                      const isCorrect = userAns === q.correct_answer;
+                      const dir = getTextDirection(q.question);
 
-                        <div className="ml-11 space-y-3">
-                          {userAns && (
-                            <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
-                              <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
-                              <span
-                                className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`}
-                                style={{ direction: getTextDirection(userAns) }}
-                              >
-                                {userAns}
-                              </span>
-                            </div>
-                          )}
-                          {!userAns && (
-                            <div className="quiz-answer-box not-answered">
-                              <span className="quiz-answer-label not-answered">Not answered</span>
-                            </div>
-                          )}
-                          {!isCorrect && (
-                            <div className="quiz-answer-box correct">
-                              <span className="quiz-answer-label correct">Correct answer: </span>
-                              <span
-                                className="quiz-answer-text correct"
-                                style={{ direction: getTextDirection(q.correct_answer) }}
-                              >
-                                {q.correct_answer}
-                              </span>
-                            </div>
-                          )}
-                          {q.explanation && (
-                            <div className="quiz-explanation-box">
-                              <span className="quiz-explanation-label">Explanation: </span>
-                              <span
-                                className="quiz-explanation-text"
-                                style={{ direction: getTextDirection(q.explanation) }}
-                              >
-                                {q.explanation}
-                              </span>
-                            </div>
-                          )}
+                      return (
+                        <div
+                          key={i}
+                          className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}
+                        >
+                          <div className="flex items-start gap-3 mb-4">
+                            {isCorrect ? (
+                              <div className="quiz-result-icon-wrapper correct">
+                                <CheckCircle size={24} className="quiz-result-icon correct" />
+                              </div>
+                            ) : (
+                              <div className="quiz-result-icon-wrapper wrong">
+                                <XCircle size={24} className="quiz-result-icon wrong" />
+                              </div>
+                            )}
+                            <p
+                              className="quiz-result-question"
+                              style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
+                            >
+                              {i + 1}. {q.question}
+                            </p>
+                          </div>
+
+                          <div className="ml-11 space-y-3">
+                            {userAns && (
+                              <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
+                                <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
+                                <span
+                                  className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`}
+                                  style={{ direction: getTextDirection(userAns) }}
+                                >
+                                  {userAns}
+                                </span>
+                              </div>
+                            )}
+                            {!userAns && (
+                              <div className="quiz-answer-box not-answered">
+                                <span className="quiz-answer-label not-answered">Not answered</span>
+                              </div>
+                            )}
+                            {!isCorrect && (
+                              <div className="quiz-answer-box correct">
+                                <span className="quiz-answer-label correct">Correct answer: </span>
+                                <span
+                                  className="quiz-answer-text correct"
+                                  style={{ direction: getTextDirection(q.correct_answer) }}
+                                >
+                                  {q.correct_answer}
+                                </span>
+                              </div>
+                            )}
+                            {q.explanation && (
+                              <div className="quiz-explanation-box">
+                                <span className="quiz-explanation-label">Explanation: </span>
+                                <span
+                                  className="quiz-explanation-text"
+                                  style={{ direction: getTextDirection(q.explanation) }}
+                                >
+                                  {q.explanation}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
 
                 <div className="flex gap-3">
@@ -993,37 +1091,72 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   )}
                 </div>
 
-                <div className="mb-8">
-                  <p
-                    className="text-xl font-medium text-white leading-relaxed"
-                    style={{
-                      direction: getTextDirection(currentQuizData[currentQuestionIndex]?.question || ''),
-                      textAlign: getTextDirection(currentQuizData[currentQuestionIndex]?.question || '') === 'rtl' ? 'right' : 'left'
-                    }}
-                  >
-                    {currentQuizData[currentQuestionIndex]?.question}
-                  </p>
+                <div className="mb-4">
+                  {(() => {
+                    const q = currentQuizData[currentQuestionIndex];
+                    const showTrans = questionTranslationEnabled.has(currentQuestionIndex) && !!q?.translationQuestion;
+                    const displayQuestion = showTrans ? q.translationQuestion || q.question : q.question;
+                    const dir = getTextDirection(displayQuestion || '');
+                    return (
+                      <div>
+                        <p
+                          className="text-xl font-medium text-white leading-relaxed"
+                          style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
+                        >
+                          {displayQuestion}
+                        </p>
+                        {/* Per-question translation toggle button */}
+                        {currentQuizData[currentQuestionIndex]?.translationQuestion && (() => {
+                          const enabled = questionTranslationEnabled.has(currentQuestionIndex);
+                          return (
+                              <button
+                                onClick={() => {
+                                  const s = new Set(questionTranslationEnabled);
+                                  if (s.has(currentQuestionIndex)) s.delete(currentQuestionIndex);
+                                  else s.add(currentQuestionIndex);
+                                  setQuestionTranslationEnabled(s);
+                                }}
+                                className={`ml-0 mt-2 translation-toggle ${enabled ? 'on' : 'off'}`}
+                              >
+                                {enabled ? (
+                                  <>
+                                    <CheckCircle size={14} />
+                                    <span>Translation: On</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <EyeOff size={14} />
+                                    <span>Translation: Off</span>
+                                  </>
+                                )}
+                              </button>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="quiz-choices-container mb-8">
-                  {currentQuizData[currentQuestionIndex]?.choices.map((choice, idx) => {
-                    const isSelected = userAnswers[currentQuestionIndex] === choice;
-                    const dir = getTextDirection(choice);
-
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => selectAnswer(choice)}
-                        className={`quiz-choice${isSelected ? ' selected' : ''}`}
-                        style={{
-                          direction: dir,
-                          textAlign: dir === 'rtl' ? 'right' : 'left'
-                        }}
-                      >
-                        {choice}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    const q = currentQuizData[currentQuestionIndex];
+                    const showTrans = questionTranslationEnabled.has(currentQuestionIndex) && !!q?.translationChoices;
+                    const choicesList = showTrans ? (q.translationChoices || []) : (q.choices || []);
+                    return choicesList.map((choice, idx) => {
+                      const isSelected = userAnswers[currentQuestionIndex] === choice;
+                      const dir = getTextDirection(choice);
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => selectAnswer(choice)}
+                          className={`quiz-choice${isSelected ? ' selected' : ''}`}
+                          style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
+                        >
+                          {choice}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
 
                 <div className="flex gap-3">
@@ -1058,6 +1191,39 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       </main>
 
       <PDFViewer pdf={selectedPdf} onClose={() => { setSelectedPdf(null); setViolation(false); }} violation={violation} onViolation={() => setViolation(true)} canDownload={canDownload} />
+
+      {showPeriodicAnswerModal && periodicAnswerIndex !== null && (
+        <div className="modal-overlay animate-fade-in">
+          <div className="modal-content modal-md p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-white">Answer Review</h3>
+            </div>
+            <div>
+              <p className="text-lg text-white mb-4" style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].question) }}>
+                {currentQuizData[periodicAnswerIndex].question}
+              </p>
+              <div className="mb-4">
+                <div className="quiz-answer-box correct">
+                  <span className="quiz-answer-label correct">Correct answer: </span>
+                  <span className="quiz-answer-text correct" style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].correct_answer) }}>
+                    {currentQuizData[periodicAnswerIndex].correct_answer}
+                  </span>
+                </div>
+                {currentQuizData[periodicAnswerIndex].explanation && (
+                  <div className="quiz-explanation-box mt-4">
+                    <span className="quiz-explanation-label">Explanation: </span>
+                    <p style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].explanation || '') }}>{currentQuizData[periodicAnswerIndex].explanation}</p>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => { setShowPeriodicAnswerModal(false); setPeriodicAnswerIndex(null); }} className="btn bg-white/10">Close</button>
+                <button onClick={handlePeriodicContinue} className="btn btn-primary">Continue</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isFocusLost && (
         <div className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200000 }}>
