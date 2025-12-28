@@ -22,3 +22,33 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vite / build
+.vite
+build
+
+# Environment / credentials
+.env
+.env.*
+state-a1-firebase-adminsdk-*.json
+*.serviceAccount.json
+
+# VS Code workspace settings
+.vscode/settings.json
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# npm
+package-lock.json
+
+# Generated lockfiles from other package managers
+pnpm-lock.yaml
+yarn.lock
+
+# Optional: ignore coverage and local test output
+coverage
+.nyc_output
+
