@@ -1,17 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { storage, auth, db, functions } from '../firebaseConfig';
+import { storage, auth, db } from '../firebaseConfig';
 import { ref, listAll, uploadBytes } from '../utils/firebaseMonitored';
 import { getMetadata } from 'firebase/storage';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot } from '../utils/firebaseMonitored';
 import { increment } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
-import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, Download, ShieldAlert, EyeOff, BookOpen, ChevronDown, Clock, CheckCircle, XCircle, ArrowLeft, ArrowRight } from 'lucide-react';
+import { LogOut, FileText, FolderOpen, Loader2, LayoutGrid, X, ShieldCheck, Lock, BookOpen, ChevronDown, Clock, CheckCircle, XCircle, ArrowLeft, ArrowRight, Play, Plus, Check, EyeOff, ShieldAlert, Trash2 } from 'lucide-react';
 import { PDFViewer } from './PDFViewer';
+import { AppAlert } from './AppAlert';
+import { ContributionModal } from './ContributionModal';
 
-interface PDFFile { name: string; url: string; date: string; size: string; path: string; }
-interface MainPageProps { onLogout: () => void; onNavigateAdmin: () => void; isAdmin: boolean; }
-const ALLOWED_ADMIN_UIDS = ["SveIem0WRcSCKl1IK44dZ1KfalO2", "s5rGItmRedXGhgjKr0hUW256Xor1"];
+interface PDFFile {
+  name: string;
+  url: string;
+  date: string;
+  size: string;
+  path: string;
+}
+
+interface MainPageProps {
+  onLogout: () => void;
+  onNavigateAdmin: () => void;
+  isAdmin: boolean;
+}
 
 interface QuizQuestion {
   question: string;
@@ -22,7 +33,19 @@ interface QuizQuestion {
   translationChoices?: string[];
 }
 
+type BlockSummary = {
+  start: number;
+  end: number;
+  correct: number;
+  total: number;
+  questions: QuizQuestion[];
+  answers: (string | null)[]
+};
+
+const ALLOWED_ADMIN_UIDS = ["SveIem0WRcSCKl1IK44dZ1KfalO2", "s5rGItmRedXGhgjKr0hUW256Xor1"];
+
 export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, isAdmin }) => {
+  // State management
   const [weeks, setWeeks] = useState<string[]>([]);
   const [activeWeek, setActiveWeek] = useState<string | null>(null);
   const [pdfs, setPdfs] = useState<PDFFile[]>([]);
@@ -30,7 +53,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [loadingPDFs, setLoadingPDFs] = useState(false);
   const [userName, setUserName] = useState('');
   const [canDownload, setCanDownload] = useState(false);
-  const [globalPdfSetting, setGlobalPdfSetting] = useState<boolean | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedPdf, setSelectedPdf] = useState<PDFFile | null>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -40,12 +62,9 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [violation, setViolation] = useState(false);
   const [isFocusLost, setIsFocusLost] = useState(false);
   const [isPermanentlyBlocked, setIsPermanentlyBlocked] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [activeSection, setActiveSection] = useState<'weeks' | 'quizzes'>('weeks');
   const [showWeeksDropdown, setShowWeeksDropdown] = useState(true);
   const [lectureTypes, setLectureTypes] = useState<string[]>([]);
-  const [userStats, setUserStats] = useState<{ quiziTimes?: number; screened?: number }>({});
 
   // Quiz States
   const [selectedQuizType, setSelectedQuizType] = useState<string | null>(null);
@@ -61,15 +80,34 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const [loadingQuiz, setLoadingQuiz] = useState(false);
   const [showPeriodicAnswerModal, setShowPeriodicAnswerModal] = useState(false);
   const [periodicAnswerIndex, setPeriodicAnswerIndex] = useState<number | null>(null);
-  const [blockSummaries, setBlockSummaries] = useState<Array<{ start: number; end: number; correct: number; total: number; questions: QuizQuestion[]; answers: (string | null)[] }>>([]);
+  const [periodicBlock, setPeriodicBlock] = useState<BlockSummary | null>(null);
+  const [blockSummaries, setBlockSummaries] = useState<BlockSummary[]>([]);
   const [questionTranslationEnabled, setQuestionTranslationEnabled] = useState<Set<number>>(new Set());
+  const [showContributionModal, setShowContributionModal] = useState(false);
+  const [showSubjectDropdown, setShowSubjectDropdown] = useState(false);
 
   // Quiz Configuration
-  const [quizTimerMinutes, setQuizTimerMinutes] = useState<number | null>(5); // null = no timer
-  const [quizQuestionCount, setQuizQuestionCount] = useState<number>(10);
-  const [quizChoicesCount, setQuizChoicesCount] = useState<number>(4);
+  const [quizTimerMinutes, setQuizTimerMinutes] = useState<number | null>(5);
+  const [showQuestionTranslation, setShowQuestionTranslation] = useState(false);
 
+  // Refs
   const passwordInputRef = useRef<HTMLInputElement>(null);
+  const subjectDropdownRef = useRef<HTMLDivElement>(null);
+
+  // AppAlert State
+  const [appAlert, setAppAlert] = useState<{
+    show: boolean;
+    title?: string;
+    message: string;
+    type?: 'success' | 'error' | 'info' | 'warning';
+  }>({
+    show: false,
+    message: ''
+  });
+
+  const showAlert = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info', title?: string) => {
+    setAppAlert({ show: true, message, type, title });
+  };
 
   // Timer effect for quiz
   useEffect(() => {
@@ -94,6 +132,7 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Initialize
   useEffect(() => {
     setActiveSection('weeks');
     setShowWeeksDropdown(true);
@@ -102,12 +141,12 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   useEffect(() => {
     setUserName(localStorage.getItem("Name") || "User");
     loadWeeks();
+
     const checkPerms = async () => {
       const num = localStorage.getItem("Number");
       try {
         const s = await getDoc(doc(db, "Dashboard", "Settings"));
         const globalPdf = s.exists() ? (s.data()["PDF-Down"] === true) : null;
-        setGlobalPdfSetting(globalPdf);
         if (globalPdf === true) {
           setCanDownload(true);
           return;
@@ -124,32 +163,20 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
     const fetchLectureTypes = async () => {
       try {
-        // Try new collection name first, then fall back to the old one
         let querySnapshot = await getDocs(collection(db, "quizzes"));
-        console.debug('fetchLectureTypes: quizzes snapshot size', querySnapshot?.size);
         if (!querySnapshot || querySnapshot.size === 0) {
           querySnapshot = await getDocs(collection(db, "quizi"));
-          console.debug('fetchLectureTypes: quizi snapshot size', querySnapshot?.size);
         }
         const ids = querySnapshot.docs.map(doc => doc.id);
-        console.debug('fetchLectureTypes: lecture ids', ids);
         setLectureTypes(ids);
       } catch (e) {
         console.error("Failed to fetch lecture types", e);
       }
     };
     fetchLectureTypes();
-
-    const num = localStorage.getItem("Number");
-    if (num) {
-      const userDocRef = doc(db, "Numbers", num);
-      const unsub = onSnapshot(userDocRef, (snap) => {
-        if (snap.exists()) setUserStats({ quiziTimes: snap.data()['Quizi-Times'], screened: snap.data()['Screened'] });
-      });
-      return () => unsub();
-    }
   }, []);
 
+  // Security: Disable dev tools and context menu
   useEffect(() => {
     const userNumber = localStorage.getItem("Number");
     const allowedNumber = "01001308280";
@@ -170,24 +197,18 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     }
   }, []);
 
+  // Close dropdown on outside click
   useEffect(() => {
-    try {
-      const unsub = onSnapshot(doc(db, 'Dashboard', 'Settings'), (snap) => {
-        if (snap.exists()) {
-          const globalPdf = snap.data()['PDF-Down'];
-          setGlobalPdfSetting(globalPdf === true);
-          if (globalPdf === true) setCanDownload(true);
-          else {
-            const num = localStorage.getItem('Number');
-            if (!num) { setCanDownload(false); return; }
-            getDoc(doc(db, 'Numbers', num)).then(s => { if (s.exists()) setCanDownload(s.data()['PDF-Down'] === true); else setCanDownload(false); }).catch(() => { });
-          }
-        }
-      });
-      return () => unsub();
-    } catch (e) { }
+    const handleClickOutside = (event: MouseEvent) => {
+      if (subjectDropdownRef.current && !subjectDropdownRef.current.contains(event.target as Node)) {
+        setShowSubjectDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Check for blocked status
   useEffect(() => {
     const num = localStorage.getItem("Number");
     if (!num) return;
@@ -198,103 +219,112 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => { if (activeWeek) loadWeekPDFs(activeWeek); }, [activeWeek]);
-  useEffect(() => { if (showAdminLogin) setTimeout(() => passwordInputRef.current?.focus(), 100); }, [showAdminLogin]);
+  // Load PDFs when week changes
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 900);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    if (activeWeek) loadWeekPDFs(activeWeek);
+  }, [activeWeek]);
 
+  // Focus password input when admin login opens
   useEffect(() => {
-    const checkNotificationPermission = () => {
-      if ('Notification' in window) {
-        if (Notification.permission === 'granted') {
-          setShowNotificationModal(false);
-        } else {
-          setShowNotificationModal(true);
-        }
-      }
-    };
-    checkNotificationPermission();
-    const interval = setInterval(checkNotificationPermission, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    if (showAdminLogin) setTimeout(() => passwordInputRef.current?.focus(), 100);
+  }, [showAdminLogin]);
 
+  // Security: Handle focus loss
   useEffect(() => {
-    // Handle visibility change - just close PDF silently if user switches tabs
     const handleVisibilityChange = () => {
       if (document.hidden && selectedPdf) {
-        // User switched tabs/windows - just close PDF silently, no violation
         setSelectedPdf(null);
         setViolation(false);
       } else if (document.hidden) {
         setIsFocusLost(true);
       }
     };
+
     const handleBlur = () => {
       if (document.activeElement instanceof HTMLIFrameElement) return;
       if (selectedPdf) {
-        // User clicked away - just close PDF silently, no violation
         setSelectedPdf(null);
         setViolation(false);
       } else {
         setIsFocusLost(true);
       }
     };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
     };
   }, [selectedPdf]);
 
+  // Security: Screenshot detection
   useEffect(() => {
-    if (!selectedPdf) { setViolation(false); return; }
+    if (!selectedPdf) {
+      setViolation(false);
+      return;
+    }
+
     const handleViolation = async () => {
       if (violation) return;
       setViolation(true);
       const num = localStorage.getItem("Number");
       if (num) {
-        try { await updateDoc(doc(db, "Numbers", num), { Screened: increment(1) }); } catch (e) { console.error("Failed to log violation", e); }
+        try {
+          await updateDoc(doc(db, "Numbers", num), { Screened: increment(1) });
+        } catch (e) {
+          console.error("Failed to log violation", e);
+        }
+
         try {
           const canvas = document.createElement('canvas');
-          canvas.width = 1280; canvas.height = 720;
+          canvas.width = 1280;
+          canvas.height = 720;
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            ctx.fillStyle = '#09090b'; ctx.fillRect(0, 0, 1280, 720);
-            ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 10; ctx.strokeRect(50, 50, 1180, 620);
-            ctx.fillStyle = '#ef4444'; ctx.font = 'bold 80px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('SECURITY VIOLATION', 640, 250);
-            ctx.fillStyle = '#ffffff'; ctx.font = '40px sans-serif'; ctx.fillText('SCREENSHOT ATTEMPT DETECTED', 640, 320);
-            ctx.fillStyle = '#a1a1aa'; ctx.font = '30px monospace';
+            ctx.fillStyle = '#09090b';
+            ctx.fillRect(0, 0, 1280, 720);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 10;
+            ctx.strokeRect(50, 50, 1180, 620);
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 80px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('SECURITY VIOLATION', 640, 250);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '40px sans-serif';
+            ctx.fillText('SCREENSHOT ATTEMPT DETECTED', 640, 320);
+            ctx.fillStyle = '#a1a1aa';
+            ctx.font = '30px monospace';
             ctx.fillText(`User Name: ${localStorage.getItem("Name") || 'Unknown'}`, 640, 450);
             ctx.fillText(`User ID:   ${num}`, 640, 500);
             ctx.fillText(`Timestamp: ${new Date().toLocaleString()}`, 640, 550);
-            ctx.fillText(`Device:    ${localStorage.getItem("DeviceName") || 'Unknown'}`, 640, 600);
-            canvas.toBlob(async (blob) => { if (blob) { const fname = `Shot_${num}_${Date.now()}.png`; await uploadBytes(ref(storage, `Captured-Shots/${fname}`), blob); } });
+
+            canvas.toBlob(async (blob) => {
+              if (blob) {
+                const fname = `Shot_${num}_${Date.now()}.png`;
+                await uploadBytes(ref(storage, `Captured-Shots/${fname}`), blob);
+              }
+            });
           }
-        } catch (e) { console.error("Evidence generation failed", e); }
+        } catch (e) {
+          console.error("Evidence generation failed", e);
+        }
       }
     };
 
-    // Track volume button presses for mobile screenshot detection
     let volumeUpPressed = false;
     let volumeDownPressed = false;
-    let volumeButtonPressTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Standard screenshot shortcuts
       if (e.key === 'PrintScreen' || (e.ctrlKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5'))) {
         e.preventDefault();
         handleViolation();
       }
 
-      // Volume button detection for mobile devices
       if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
         volumeUpPressed = true;
-        volumeButtonPressTime = Date.now();
-        // Check if volume down is also pressed (screenshot combo)
         if (volumeDownPressed) {
           e.preventDefault();
           handleViolation();
@@ -303,8 +333,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = true;
-        volumeButtonPressTime = Date.now();
-        // Check if volume up is also pressed (screenshot combo)
         if (volumeUpPressed) {
           e.preventDefault();
           handleViolation();
@@ -314,45 +342,19 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen') handleViolation();
-
-      // Reset volume button states
       if (e.key === 'VolumeUp' || e.key === 'AudioVolumeUp' || e.code === 'VolumeUp') {
         volumeUpPressed = false;
-        // If volume button was held for a while, might be screenshot attempt
-        if (Date.now() - volumeButtonPressTime > 200 && volumeDownPressed) {
-          handleViolation();
-        }
       }
-
       if (e.key === 'VolumeDown' || e.key === 'AudioVolumeDown' || e.code === 'VolumeDown') {
         volumeDownPressed = false;
-        // If volume button was held for a while, might be screenshot attempt
-        if (Date.now() - volumeButtonPressTime > 200 && volumeUpPressed) {
-          handleViolation();
-        }
-      }
-    };
-
-    // Note: Visibility change is handled separately above to just close PDF silently
-    // Only actual screenshot attempts (keys, touches) trigger violations here
-
-    // Media key events (alternative volume button detection)
-    const handleMediaKey = (e: any) => {
-      if (e.key === 'VolumeUp' || e.key === 'VolumeDown' || e.code === 'VolumeUp' || e.code === 'VolumeDown') {
-        if (volumeUpPressed || volumeDownPressed) {
-          handleViolation();
-        }
       }
     };
 
     const handleCopy = (e: ClipboardEvent) => { e.preventDefault(); };
-
-    // Enhanced touch detection (three touch method + volume button simulation)
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length >= 3) {
         handleViolation();
       }
-      // If touching while volume buttons might be pressed (heuristic)
       if (e.touches.length >= 2 && (volumeUpPressed || volumeDownPressed)) {
         handleViolation();
       }
@@ -363,96 +365,134 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     window.addEventListener('copy', handleCopy, true);
     window.addEventListener('touchstart', handleTouchStart, true);
 
-    // Try to capture media keys
-    try {
-      window.addEventListener('keydown', handleMediaKey, true);
-    } catch (e) {
-      // Some browsers don't support media key events
-    }
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('copy', handleCopy, true);
       window.removeEventListener('touchstart', handleTouchStart, true);
-      try {
-        window.removeEventListener('keydown', handleMediaKey, true);
-      } catch (e) { }
     };
   }, [selectedPdf, violation]);
 
   const loadWeeks = async () => {
     try {
       const res = await listAll(ref(storage, '/'));
-      const w = res.prefixes.map(f => f.name).filter(n => n.startsWith('Week ')).sort((a, b) => parseInt(a.split(' ')[1] || '0') - parseInt(b.split(' ')[1] || '0'));
-      setWeeks(w); if (w.length > 0) setActiveWeek(w[0]);
-    } catch (e) { console.error(e); } finally { setLoadingWeeks(false); }
+      const w = res.prefixes
+        .map(f => f.name)
+        .filter(n => n.startsWith('Week '))
+        .sort((a, b) => parseInt(a.split(' ')[1] || '0') - parseInt(b.split(' ')[1] || '0'));
+      setWeeks(w);
+      if (w.length > 0) setActiveWeek(w[0]);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingWeeks(false);
+    }
   };
 
   const loadWeekPDFs = async (w: string) => {
-    setLoadingPDFs(true); setPdfs([]);
+    setLoadingPDFs(true);
+    setPdfs([]);
     try {
       const res = await listAll(ref(storage, w));
       const p = await Promise.all(res.items.map(async (i) => {
         try {
           const m = await getMetadata(i);
-          return { name: i.name.replace('.pdf', ''), url: '', date: new Date(m.timeCreated).toLocaleDateString('en-GB'), size: `${(m.size / (1024 * 1024)).toFixed(2)}mb`, path: i.fullPath };
-        } catch { return null; }
+          return {
+            name: i.name.replace('.pdf', ''),
+            url: '',
+            date: new Date(m.timeCreated).toLocaleDateString('en-GB'),
+            size: `${(m.size / (1024 * 1024)).toFixed(2)}mb`,
+            path: i.fullPath
+          };
+        } catch {
+          return null;
+        }
       }));
       setPdfs(p.filter((x): x is PDFFile => x !== null));
-    } catch { } finally { setLoadingPDFs(false); }
+    } catch {
+    } finally {
+      setLoadingPDFs(false);
+    }
   };
 
   const handleAdminLoginSubmit = async () => {
     if (!adminPassword) return;
-    setAdminLoading(true); setAdminError('');
+    setAdminLoading(true);
+    setAdminError('');
     try {
       const c = await signInWithEmailAndPassword(auth, "temrevil+1@gmail.com", adminPassword);
       if (c.user.email === 'temrevil+1@gmail.com' || ALLOWED_ADMIN_UIDS.includes(c.user.uid)) {
-        setShowAdminLogin(false); setAdminPassword(''); onNavigateAdmin();
-      } else { throw new Error('Access Denied'); }
-    } catch (err) { setAdminError('Access Denied'); recordFailedLoginAttempt(adminPassword); } finally { setAdminLoading(false); }
+        setShowAdminLogin(false);
+        setAdminPassword('');
+        onNavigateAdmin();
+      } else {
+        throw new Error('Access Denied');
+      }
+    } catch (err) {
+      setAdminError('Access Denied');
+      recordFailedLoginAttempt(adminPassword);
+    } finally {
+      setAdminLoading(false);
+    }
   };
 
   const recordFailedLoginAttempt = async (enteredPassword: string) => {
     try {
       const brokerId = localStorage.getItem('Number') || 'Unknown_User';
       const now = new Date();
-      try { await updateDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: increment(1) }); } catch (e) { try { await setDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: 1 }); } catch (er) { } }
+      try {
+        await updateDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: increment(1) });
+      } catch (e) {
+        try {
+          await setDoc(doc(db, 'Dashboard', 'Failed Login'), { Count: 1 });
+        } catch (er) { }
+      }
+
       try {
         const brokerDocRef = doc(db, 'Brokers', brokerId);
         const docSnap = await getDoc(brokerDocRef);
         let nextAttemptId = 1;
-        if (docSnap.exists()) { const data = docSnap.data(); const attemptKeys = Object.keys(data.Attempts || {}).map(Number).filter(k => !isNaN(k)); if (attemptKeys.length > 0) { nextAttemptId = Math.max(...attemptKeys) + 1; } }
-        const newAttemptData = { Password: enteredPassword, Date: now.toLocaleDateString('en-GB'), Time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }), };
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const attemptKeys = Object.keys(data.Attempts || {}).map(Number).filter(k => !isNaN(k));
+          if (attemptKeys.length > 0) {
+            nextAttemptId = Math.max(...attemptKeys) + 1;
+          }
+        }
+
+        const newAttemptData = {
+          Password: enteredPassword,
+          Date: now.toLocaleDateString('en-GB'),
+          Time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+        };
+
         await setDoc(brokerDocRef, { Attempts: { [nextAttemptId]: newAttemptData } }, { merge: true });
-      } catch (e) { console.warn('Failed to write/update login attempt record', e); }
-    } catch (e) { console.warn('Failed to record failed login', e); }
+      } catch (e) {
+        console.warn('Failed to write/update login attempt record', e);
+      }
+    } catch (e) {
+      console.warn('Failed to record failed login', e);
+    }
   };
 
   // Quiz Functions
   const loadQuizMaps = async (quizType: string) => {
     setLoadingQuiz(true);
     try {
-      // Try new collection name then fallback to old name
       let docSnap = await getDoc(doc(db, "quizzes", quizType));
-      console.debug(`loadQuizMaps: tried quizzes/${quizType}`, !!docSnap?.exists());
       if (!docSnap.exists()) {
         docSnap = await getDoc(doc(db, "quizi", quizType));
-        console.debug(`loadQuizMaps: tried quizi/${quizType}`, !!docSnap?.exists());
       }
+
       if (docSnap.exists()) {
         const data = docSnap.data();
         let maps: any[] = [];
 
-        // If the document contains a `quizzes` array (new format), treat it as a single section
         if (Array.isArray(data.quizzes)) {
           maps = [{ id: 'all', data: { quiz: data.quizzes } }];
-          console.debug('loadQuizMaps: using quizzes array, count=', data.quizzes.length);
         } else {
-          // Fallback to previous map-per-key format
           maps = Object.keys(data).map(key => ({ id: key, data: data[key] }));
-          console.debug('loadQuizMaps: using map-per-key format, maps=', maps.length);
         }
 
         setQuizMaps(maps);
@@ -468,20 +508,10 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     }
   };
 
-  const toggleMapSelection = (mapIndex: number) => {
-    const newSelected = new Set(selectedMaps);
-    if (newSelected.has(mapIndex)) {
-      newSelected.delete(mapIndex);
-    } else {
-      newSelected.add(mapIndex);
-    }
-    setSelectedMaps(newSelected);
-  };
-
   const startQuizSession = async (mapsToUse?: Set<number>) => {
     const useMaps = mapsToUse ?? selectedMaps;
     if (!useMaps || useMaps.size === 0) {
-      alert("Please select at least one section");
+      showAlert("Please select at least one section to start the quiz.", "warning", "No Selection");
       return;
     }
 
@@ -492,27 +522,26 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
         allQuestions = [...allQuestions, ...map.data.quiz];
       }
     });
-    console.debug('startQuizSession: collected raw questions count=', allQuestions.length, 'useMaps=', Array.from(useMaps));
-    if (allQuestions.length > 0) console.debug('startQuizSession: sample raw question', allQuestions[0]);
 
     if (allQuestions.length === 0) {
-      alert("No questions found in selected sections");
+      showAlert("No questions were found in the selected sections.", "info", "Empty Sections");
       return;
     }
 
-    // Normalize raw question objects coming from Firestore, remove duplicates,
-    // shuffle questions and shuffle choices. Use ALL questions (no limits).
+    // Normalize and deduplicate questions
     const normalized: QuizQuestion[] = [];
     const seenKeys = new Set<string | number>();
+
     useMaps.forEach(mapIndex => {
       const map = quizMaps[mapIndex];
       if (!map || !map.data || !map.data.quiz) return;
+
       map.data.quiz.forEach((raw: any) => {
         const key = raw.id ?? raw._id ?? raw.question ?? JSON.stringify(raw);
         if (seenKeys.has(key)) return;
         seenKeys.add(key);
-        const translation = raw.translation || null;
 
+        const translation = raw.translation || null;
         const questionTextRaw: string = raw.question || raw.q || '';
         const choicesArrRaw: string[] = raw.options || raw.choices || [];
         const translationQuestion: string | undefined = translation?.question;
@@ -520,11 +549,19 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
         const correctAns: string = raw.correctAnswer || raw.correct_answer || raw.correct || '';
         const explanation: string | undefined = raw.explanation || raw.explain;
 
-        // Use only choices provided by Firestore (do not inject the correct answer)
-        const choicesSet = Array.from(new Set(choicesArrRaw.filter(Boolean)));
-        const shuffled = choicesSet.sort(() => Math.random() - 0.5);
+        // Synchronized shuffling for questions and translations
+        const choicesClean = choicesArrRaw.filter(Boolean);
+        const indices = choicesClean.map((_, i) => i).sort(() => Math.random() - 0.5);
 
-        const translationChoices = translationChoicesArr ? Array.from(new Set(translationChoicesArr.filter(Boolean))).sort(() => Math.random() - 0.5) : undefined;
+        const shuffled = indices.map(i => choicesClean[i]);
+
+        // Ensure translation choices align with shuffled indices if they exist
+        let translationChoices: string[] | undefined;
+        if (translationChoicesArr && translationChoicesArr.length >= choicesClean.length) {
+          translationChoices = indices.map(i => translationChoicesArr[i] || "");
+        } else {
+          translationChoices = translationChoicesArr;
+        }
 
         normalized.push({
           question: questionTextRaw,
@@ -537,16 +574,12 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       });
     });
 
-    // Shuffle question order
     const shuffledQuestions = normalized.sort(() => Math.random() - 0.5);
 
-    const processedQuestions = shuffledQuestions;
-
-    setCurrentQuizData(processedQuestions);
-    setUserAnswers(new Array(processedQuestions.length).fill(null));
+    setCurrentQuizData(shuffledQuestions);
+    setUserAnswers(new Array(shuffledQuestions.length).fill(null));
     setCurrentQuestionIndex(0);
 
-    // Set timer based on selection
     if (quizTimerMinutes === null) {
       setQuizTimer(0);
       setTimerActive(false);
@@ -576,19 +609,31 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   };
 
   const navigateQuestion = (direction: number) => {
-    // Prevent moving forward if no answer is selected
     if (direction > 0 && userAnswers[currentQuestionIndex] === null) {
       return;
     }
 
-    // if moving forward and the just-answered question is a multiple of 10,
-    // show the periodic answer modal instead of advancing immediately
     if (direction > 0) {
       const justAnsweredIndex = currentQuestionIndex;
       if (((justAnsweredIndex + 1) % 10) === 0) {
         const s = Math.floor(justAnsweredIndex / 10) * 10;
         const e = Math.min(s + 9, currentQuizData.length - 1);
+        const answersSlice = userAnswers.slice(s, e + 1);
+        const questionsSlice = currentQuizData.slice(s, e + 1);
+        let correct = 0;
+        for (let i = 0; i < questionsSlice.length; i++) {
+          if (answersSlice[i] === questionsSlice[i].correct_answer) correct++;
+        }
+        const summary = {
+          start: s,
+          end: e,
+          correct,
+          total: questionsSlice.length,
+          questions: questionsSlice,
+          answers: answersSlice
+        };
         recordBlockSummary(s, e);
+        setPeriodicBlock(summary);
         setPeriodicAnswerIndex(justAnsweredIndex);
         setShowPeriodicAnswerModal(true);
         return;
@@ -606,46 +651,66 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
   const handlePeriodicContinue = () => {
     setShowPeriodicAnswerModal(false);
     const i = periodicAnswerIndex ?? 0;
-    // if this was the last question, finish quiz; otherwise advance
     if (i >= currentQuizData.length - 1) {
       finishQuiz();
     } else {
       setCurrentQuestionIndex(i + 1);
     }
     setPeriodicAnswerIndex(null);
+    setPeriodicBlock(null);
   };
 
   const recordBlockSummary = (start: number, end: number) => {
-    // avoid duplicate summaries for same block
     if (blockSummaries.some(b => b.start === start && b.end === end)) return;
+
     const answersSlice = userAnswers.slice(start, end + 1);
     const questionsSlice = currentQuizData.slice(start, end + 1);
     let correct = 0;
+
     for (let i = 0; i < questionsSlice.length; i++) {
       if (answersSlice[i] === questionsSlice[i].correct_answer) correct++;
     }
-    const summary = { start, end, correct, total: questionsSlice.length, questions: questionsSlice, answers: answersSlice };
+
+    const summary = {
+      start,
+      end,
+      correct,
+      total: questionsSlice.length,
+      questions: questionsSlice,
+      answers: answersSlice
+    };
+
     setBlockSummaries(prev => [...prev, summary]);
   };
 
   const finishQuiz = () => {
     setTimerActive(false);
-    // ensure we have summaries for any remaining blocks not yet recorded
     const totalBlocks = Math.ceil(currentQuizData.length / 10);
+
     for (let b = 0; b < totalBlocks; b++) {
       const s = b * 10;
       const e = Math.min(s + 9, currentQuizData.length - 1);
+
       if (!blockSummaries.some(bs => bs.start === s && bs.end === e)) {
-        // compute and add
         const answersSlice = userAnswers.slice(s, e + 1);
         const questionsSlice = currentQuizData.slice(s, e + 1);
         let correct = 0;
+
         for (let i = 0; i < questionsSlice.length; i++) {
           if (answersSlice[i] === questionsSlice[i].correct_answer) correct++;
         }
-        setBlockSummaries(prev => [...prev, { start: s, end: e, correct, total: questionsSlice.length, questions: questionsSlice, answers: answersSlice }]);
+
+        setBlockSummaries(prev => [...prev, {
+          start: s,
+          end: e,
+          correct,
+          total: questionsSlice.length,
+          questions: questionsSlice,
+          answers: answersSlice
+        }]);
       }
     }
+
     setQuizFinished(true);
   };
 
@@ -656,7 +721,11 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
         correct++;
       }
     });
-    return { correct, total: currentQuizData.length, percentage: Math.round((correct / currentQuizData.length) * 100) };
+    return {
+      correct,
+      total: currentQuizData.length,
+      percentage: Math.round((correct / currentQuizData.length) * 100)
+    };
   };
 
   const resetQuiz = () => {
@@ -669,8 +738,6 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     setQuizTimer(300);
     setTimerActive(false);
     setQuizTimerMinutes(5);
-    setQuizQuestionCount(10);
-    setQuizChoicesCount(4);
     setBlockSummaries([]);
   };
 
@@ -685,22 +752,24 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
     return arabicPattern.test(text) ? 'rtl' : 'ltr';
   };
 
+
+
   return (
-    <div className="flex flex-row h-screen w-full select-none overflow-hidden bg-app-base">
+    <div className="flex flex-row h-screen w-full select-none overflow-hidden">
 
       {/* SIDEBAR */}
-      <aside className={`sidebar z-20 shadow-lg ${sidebarOpen ? 'mobile-open' : ''}`}>
-        <div className="sidebar-header justify-between px-6">
+      <aside className={`sidebar z-20 ${sidebarOpen ? 'mobile-open' : ''}`}>
+        <div className="sidebar-header">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg flex items-center justify-center text-white bg-surface border border-white/10" style={{ width: '36px', height: '36px' }}> <LayoutGrid size={18} /> </div>
-            <div> <h1 className="font-bold text-white tracking-tight text-base">The State</h1> </div>
+            <div className="rounded-lg flex items-center justify-center text-main bg-surface border border" style={{ width: '36px', height: '36px' }}>
+              <LayoutGrid size={18} />
+            </div>
+            <h1 className="font-bold text-main tracking-tight text-base">The State</h1>
           </div>
         </div>
 
-        {/* Navigation Items */}
-        <div className="flex-1 overflow-auto px-8 py-8 custom-scrollbar">
+        <nav className="flex-1 overflow-auto px-8 py-8 custom-scrollbar scroll-mask-v">
           <div className="flex flex-col gap-2 p-4">
-
             {/* WEEKS DROPDOWN */}
             <div className="flex flex-col">
               <button
@@ -709,36 +778,51 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   setShowWeeksDropdown(newShow);
                   if (newShow) setActiveSection('weeks');
                 }}
-                className={`nav-btn w-full justify-between group ${activeSection === 'weeks' ? 'active' : 'text-muted hover:text-white'}`}
+                className={`nav-btn w-full justify-between ${activeSection === 'weeks' ? 'active' : ''}`}
               >
                 <div className="flex items-center gap-3">
-                  <FolderOpen size={18} className={activeSection === 'weeks' ? 'text-white' : 'text-muted group-hover:text-white'} />
+                  <FolderOpen size={18} />
                   <span className="font-medium">Weeks</span>
                 </div>
                 <ChevronDown
                   size={16}
-                  className={`transition-transform duration-300 ${showWeeksDropdown ? 'rotate-180' : ''}`}
+                  className={`transition-transform ${showWeeksDropdown ? 'rotate-180' : ''}`}
                 />
               </button>
 
               <div
-                className="overflow-hidden transition-all duration-300 ease-in-out"
+                className="overflow-hidden transition-all"
                 style={{
                   maxHeight: showWeeksDropdown ? `${weeks.length * 40 + 20}px` : '0px',
                   opacity: showWeeksDropdown ? 1 : 0
                 }}
               >
-                <div className="flex flex-col gap-1 pl-4 ml-3 border-l border-white/10 mt-1">
+                <div className="flex flex-col gap-1 pl-4 ml-3 border-l mt-1" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
                   {loadingWeeks ? (
-                    <div className="flex justify-center py-2"><Loader2 className="animate-spin text-muted" size={14} /></div>
+                    <div className="flex justify-center py-2">
+                      <Loader2 className="animate-spin text-muted" size={14} />
+                    </div>
                   ) : (
                     weeks.map((week) => (
                       <button
                         key={week}
-                        onClick={() => { setActiveWeek(week); setActiveSection('weeks'); backToQuizTypes(); }}
-                        className={`nav-btn h-9 text-sm w-full justify-start pl-3 ${activeWeek === week && activeSection === 'weeks' ? 'bg-primary/20 text-primary border border-primary/20' : 'text-muted hover:text-white hover:bg-white/5 border border-transparent'}`}
+                        onClick={() => {
+                          setActiveWeek(week);
+                          setActiveSection('weeks');
+                          backToQuizTypes();
+                        }}
+                        className={`nav-btn text-sm w-full justify-between pl-3 pr-2 ${activeWeek === week && activeSection === 'weeks'
+                          ? 'bg-primary text-white font-bold border-primary shadow-lg shadow-primary/20'
+                          : 'text-muted'
+                          }`}
+                        style={{ height: '36px' }}
                       >
                         <span className="font-medium truncate">{week}</span>
+                        {activeWeek === week && activeSection === 'weeks' && (
+                          <div className="w-5 h-5 bg-white/20 rounded-md flex items-center justify-center">
+                            <Check size={12} strokeWidth={3} />
+                          </div>
+                        )}
                       </button>
                     ))
                   )}
@@ -753,24 +837,34 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 setShowWeeksDropdown(false);
                 backToQuizTypes();
               }}
-              className={`nav-btn w-full justify-start gap-3 ${activeSection === 'quizzes' ? 'active' : 'text-muted hover:text-white'}`}
+              className={`nav-btn w-full justify-start gap-3 ${activeSection === 'quizzes' ? 'active' : ''}`}
             >
               <BookOpen size={18} />
               <span className="font-medium">Quizzes</span>
             </button>
           </div>
-        </div>
+        </nav>
 
-        <div className="p-8 border-t border-white/10 mt-auto">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface/50 mb-3 border border-white/5">
-            <div className="rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold" style={{ width: '32px', height: '32px' }}>{userName.charAt(0).toUpperCase()}</div>
+        <div className="p-8 border-t mt-auto">
+          <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface/50 mb-3 border">
+            <div
+              className="rounded-full flex items-center justify-center text-main text-xs font-bold"
+              style={{ width: '32px', height: '32px', background: '#6366f1' }}
+            >
+              {userName.charAt(0).toUpperCase()}
+            </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{userName}</p>
+              <p className="text-sm font-medium text-main truncate">{userName}</p>
               <p className="text-xs text-success">Connected</p>
             </div>
           </div>
-          <button onClick={() => setShowAdminLogin(true)} className="nav-btn mb-1"> <ShieldCheck size={16} /> Management </button>
-          <button onClick={onLogout} className="nav-btn mb-1"> <LogOut size={16} /> Logout </button>
+
+          <button onClick={() => setShowAdminLogin(true)} className="nav-btn mb-1">
+            <ShieldCheck size={16} /> Management
+          </button>
+          <button onClick={onLogout} className="nav-btn mb-1">
+            <LogOut size={16} /> Logout
+          </button>
         </div>
       </aside>
 
@@ -779,9 +873,14 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
       <main className="main-content">
         <header className="content-header">
           <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
+            <button
+              onClick={() => setSidebarOpen(s => !s)}
+              className="mobile-toggle"
+            >
+              ☰
+            </button>
             <div>
-              <h2 className="text-2xl font-bold text-white">
+              <h2 className="text-2xl font-bold text-main">
                 {activeSection === 'weeks' ? (activeWeek || 'Loading...') : selectedQuizType ? selectedQuizType : 'Quizzes'}
               </h2>
               <p className="text-sm text-muted">
@@ -799,19 +898,23 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 <p className="text-sm font-medium">Syncing documents...</p>
               </div>
             ) : pdfs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted gap-6 border border-dashed border-white/10 rounded-2xl mx-auto max-w-lg p-12">
+              <div className="flex flex-col items-center justify-center h-full text-muted gap-6 border rounded-2xl mx-auto p-12" style={{ maxWidth: '32rem', borderStyle: 'dashed' }}>
                 <FolderOpen size={48} className="opacity-20" />
                 <p className="text-sm">No documents found in this directory.</p>
               </div>
             ) : (
               <div className="grid-cards">
                 {pdfs.map((pdf) => (
-                  <div key={pdf.name} onClick={() => setSelectedPdf(pdf)} className="resource-card group">
+                  <div key={pdf.name} onClick={() => setSelectedPdf(pdf)} className="card">
                     <div className="flex-1">
-                      <div className="card-icon"> <FileText size={24} /> </div>
-                      <h3 className="text-lg font-semibold text-white mb-2 leading-snug line-clamp-2 font-arabic">{pdf.name}</h3>
+                      <div className="card-icon">
+                        <FileText size={24} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-main mb-2 line-clamp-2 font-arabic" style={{ lineHeight: '1.4' }}>
+                        {pdf.name}
+                      </h3>
                     </div>
-                    <div className="pt-4 flex justify-between items-center text-muted text-xs border-t border-white/5 mt-auto">
+                    <div className="pt-4 flex justify-between items-center text-muted text-xs border-t mt-auto">
                       <span>{pdf.date}</span>
                       <span className="font-mono opacity-70">{pdf.size}</span>
                     </div>
@@ -827,28 +930,41 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                 <p className="text-sm font-medium">Loading lecture types...</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4 max-w-md quiz-container">
-                {lectureTypes.map((type) => (
+              <div className="quiz-container">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold text-main">Select Quiz Subject</h3>
                   <button
-                    key={type}
-                    onClick={() => loadQuizMaps(type)}
-                    className="quiz-btn"
+                    onClick={() => setShowContributionModal(true)}
+                    className="btn btn-secondary btn-sm gap-2 text-xs"
                   >
-                    <BookOpen size={20} />
-                    <span className="font-medium">{type}</span>
+                    <Plus size={14} /> Contribute Question
                   </button>
-                ))}
+                </div>
+                <div className="quiz-type-grid">
+                  {lectureTypes.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => loadQuizMaps(type)}
+                      className="quiz-btn animate-slide-up"
+                    >
+                      <div className="btn-icon-wrapper">
+                        <BookOpen size={28} />
+                      </div>
+                      <span className="font-semibold">{type}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )
           ) : !quizStarted ? (
-            // Quiz Map Selection
+            // Quiz Configuration
             loadingQuiz ? (
               <div className="flex flex-col items-center justify-center h-full text-muted gap-4">
                 <Loader2 size={32} className="animate-spin opacity-40" />
                 <p className="text-sm font-medium">Loading sections...</p>
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto p-6">
+              <div style={{ maxWidth: '40rem', margin: '0 auto' }} className="p-6">
                 <button
                   onClick={backToQuizTypes}
                   className="back-link-btn mb-6"
@@ -857,56 +973,86 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
                   <span>Back to Quiz Types</span>
                 </button>
 
-                <div className="bg-surface border border-white/10 rounded-xl p-6 mb-6">
-                  <h3 className="text-xl font-bold text-white mb-2">Select Sections</h3>
-                  <p className="text-sm text-muted mb-4">
-                    Choose one or more sections from <span className="text-primary font-medium">{selectedQuizType}</span> to include in this quiz.
-                  </p>
-                  <div className="mb-6">
-                    <p className="text-sm text-muted mb-4">
-                      All sections for <span className="text-primary font-medium">{selectedQuizType}</span> will be included by default. You can still go back to the sections list if you need to choose specific sections.
-                    </p>
-                    {/* Timer selection & preview (moved above start buttons) */}
-                    <div className="mb-4">
-                      <label className="form-label">Timer: <span className="text-primary">{quizTimerMinutes === null || quizTimerMinutes === 0 ? 'No timer' : `${quizTimerMinutes} minute${quizTimerMinutes !== 1 ? 's' : ''}`}</span></label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="15"
-                        value={quizTimerMinutes === null ? 0 : quizTimerMinutes}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          setQuizTimerMinutes(v === 0 ? null : Math.max(2, v));
-                        }}
-                        className="w-full quiz-range-input"
-                      />
-                      <div className="range-labels">
-                        <span>No timer</span>
-                        <span>15 min</span>
-                      </div>
-                      <p className="text-sm text-muted mt-2">Preview timer: <span className="text-primary font-medium">{quizTimerMinutes === null ? 'No timer' : formatTime(quizTimerMinutes * 60)}</span></p>
-                    </div>
+                <div className="bg-surface border rounded-2xl p-8 mb-8 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 bg-primary/5 blur-3xl rounded-full" style={{ width: '12rem', height: '12rem', marginRight: '-6rem', marginTop: '-6rem' }}></div>
 
-                    {/* Translation toggle for specific lecture */}
-                    {/* Per-question translations are available during the quiz; no global toggle here */}
-                    <div className="flex gap-3 mb-4">
-                      <button
-                        onClick={backToQuizTypes}
-                        className="btn bg-white/10 hover:bg-white/20 border border-white/10"
-                      >
-                        Back to Quiz Types
-                      </button>
-                      <button
-                        onClick={async () => {
-                          const allSet = new Set<number>();
-                          quizMaps.forEach((_, i) => allSet.add(i));
-                          setSelectedMaps(allSet);
-                          await startQuizSession(allSet);
-                        }}
-                        className="btn btn-primary"
-                      >
-                        Start Quiz (All sections)
-                      </button>
+                  <div className="relative">
+                    <h3 className="text-2xl font-bold text-main mb-2">Quiz Setup</h3>
+                    <p className="text-muted mb-8">
+                      Configure your session for <span className="text-primary font-semibold">{selectedQuizType}</span>
+                    </p>
+
+                    <div className="space-y-8">
+                      {/* Timer selection */}
+                      <div className="border rounded-xl p-6" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div className="flex items-center justify-between mb-4">
+                          <label className="text-sm font-bold uppercase tracking-wider text-muted flex items-center gap-2">
+                            <Clock size={16} className="text-primary" />
+                            Time Limit
+                          </label>
+                          <span className="text-primary font-bold text-lg">
+                            {quizTimerMinutes === null || quizTimerMinutes === 0 ? 'No timer' : `${quizTimerMinutes}m`}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="15"
+                          value={quizTimerMinutes === null ? 0 : quizTimerMinutes}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value);
+                            setQuizTimerMinutes(v === 0 ? null : Math.max(2, v));
+                          }}
+                          className="w-full mb-2"
+                          style={{
+                            appearance: 'none',
+                            height: '6px',
+                            background: 'rgba(255,255,255,0.1)',
+                            borderRadius: '3px',
+                            outline: 'none'
+                          }}
+                        />
+                        <div className="flex justify-between text-xs text-muted">
+                          <span>Unlimited</span>
+                          <span>15 min</span>
+                        </div>
+                      </div>
+
+                      <div className="border rounded-xl p-6" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="rounded-lg flex items-center justify-center text-primary" style={{ width: '40px', height: '40px', background: 'rgba(38,132,252,0.2)' }}>
+                            <LayoutGrid size={20} />
+                          </div>
+                          <div>
+                            <h4 className="text-main font-semibold">Ready to start?</h4>
+                            <p className="text-xs text-muted">All sections will be included automatically</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-4">
+                          <button
+                            onClick={async () => {
+                              const allSet = new Set<number>();
+                              quizMaps.forEach((_, i) => allSet.add(i));
+                              setSelectedMaps(allSet);
+                              await startQuizSession(allSet);
+                            }}
+                            className="btn btn-premium-primary rounded-2xl text-lg font-bold"
+                            style={{ padding: '14px 40px', height: 'auto' }}
+                          >
+                            <Play size={20} />
+                            Start Session
+                          </button>
+                          <button
+                            onClick={backToQuizTypes}
+                            className="btn btn-premium-secondary rounded-2xl text-lg font-semibold"
+                            style={{ padding: '14px 40px', height: 'auto' }}
+                          >
+                            <ArrowLeft size={20} />
+                            Go Back
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -914,405 +1060,406 @@ export const MainPage: React.FC<MainPageProps> = ({ onLogout, onNavigateAdmin, i
             )
           ) : quizFinished ? (
             // Quiz Results
-            <div className="max-w-3xl mx-auto p-6">
-              <div className="bg-surface border border-white/10 rounded-xl p-8 mb-6">
-                <div className="text-center mb-8">
-                  <h3 className="text-3xl font-bold text-white mb-4">Quiz Completed!</h3>
-                  <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-primary/20 border-4 border-primary mb-4">
-                    <span className="text-4xl font-bold text-white">{calculateScore().percentage}%</span>
-                  </div>
-                  <p className="text-lg text-muted">
-                    You got {calculateScore().correct} out of {calculateScore().total} questions correct
-                  </p>
-                </div>
+            <>
+              <div className="pb-28" style={{ maxWidth: '64rem', margin: '0 auto', padding: '24px' }}>
+                <div className="bg-surface border rounded-2xl p-8 mb-8 overflow-hidden relative">
+                  <div className="absolute top-0 right-0 bg-primary/10 blur-3xl rounded-full" style={{ width: '16rem', height: '16rem', marginRight: '-8rem', marginTop: '-8rem' }}></div>
 
-                <div className="space-y-6 mb-6">
-                  {blockSummaries.length > 0 ? (
-                    // Show all block summaries first
-                    blockSummaries
-                      .slice()
-                      .sort((a, b) => a.start - b.start)
-                      .map((block, bi) => (
-                        <div key={bi} className="block-summary p-4 border border-white/5 rounded-lg bg-black/10">
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <h4 className="text-lg font-bold">Questions {block.start + 1} - {block.end + 1}</h4>
-                              <p className="text-sm text-muted">Score: {block.correct} / {block.total}</p>
+                  <div className="relative text-center mb-8">
+                    <h3 className="text-3xl font-bold text-main mb-6 font-arabic">نتيجة الاختبار</h3>
+
+                    {(() => {
+                      const score = calculateScore();
+                      const radius = 70;
+                      const circumference = 2 * Math.PI * radius;
+                      const offset = circumference - (score.percentage / 100) * circumference;
+                      return (
+                        <div className="score-circle-container">
+                          <svg className="score-circle-svg" viewBox="0 0 160 160">
+                            <circle className="score-circle-bg" cx="80" cy="80" r={radius} />
+                            <circle
+                              className="score-circle-progress"
+                              cx="80" cy="80" r={radius}
+                              strokeDasharray={circumference}
+                              strokeDashoffset={offset}
+                            />
+                          </svg>
+                          <div className="score-value">{score.percentage}%</div>
+                        </div>
+                      );
+                    })()}
+
+                    <p className="text-xl text-muted font-arabic">
+                      لقد أجبت على <span className="text-main font-bold">{calculateScore().correct}</span> من <span className="text-main font-bold">{calculateScore().total}</span> أسئلة بشكل صحيح
+                    </p>
+                  </div>
+
+                  <div className="space-y-6 mb-6">
+                    {blockSummaries.length > 0 ? (
+                      blockSummaries
+                        .slice()
+                        .sort((a, b) => a.start - b.start)
+                        .map((block, bi) => (
+                          <div key={bi} className="p-4 border rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                            <div className="flex justify-between items-center mb-2" dir="rtl">
+                              <span className="font-bold text-main font-arabic">القسم {bi + 1} (Q{block.start + 1}-{block.end})</span>
+                              <span className="text-sm font-bold text-primary">{block.correct} / {block.total}</span>
+                            </div>
+                            <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary"
+                                style={{ width: `${(block.correct / block.total) * 100}%` }}
+                              />
                             </div>
                           </div>
-
-                          <div className="space-y-3">
-                            {block.questions.map((q, idx) => {
-                              const globalIndex = block.start + idx;
-                              const userAns = block.answers[idx];
-                              const isCorrect = userAns === q.correct_answer;
-                              const dir = getTextDirection(q.question);
-                              return (
-                                <div key={globalIndex} className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}>
-                                  <div className="flex items-start gap-3 mb-2">
-                                    {isCorrect ? (
-                                      <div className="quiz-result-icon-wrapper correct"><CheckCircle size={20} className="quiz-result-icon correct" /></div>
-                                    ) : (
-                                      <div className="quiz-result-icon-wrapper wrong"><XCircle size={20} className="quiz-result-icon wrong" /></div>
-                                    )}
-                                    <p className="quiz-result-question" style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}>{globalIndex + 1}. {q.question}</p>
-                                  </div>
-                                  <div className="ml-11 space-y-2">
-                                    {userAns ? (
-                                      <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
-                                        <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
-                                        <span className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`} style={{ direction: getTextDirection(userAns) }}>{userAns}</span>
-                                      </div>
-                                    ) : (
-                                      <div className="quiz-answer-box not-answered"><span className="quiz-answer-label not-answered">Not answered</span></div>
-                                    )}
-                                    {!isCorrect && (
-                                      <div className="quiz-answer-box correct">
-                                        <span className="quiz-answer-label correct">Correct answer: </span>
-                                        <span className="quiz-answer-text correct" style={{ direction: getTextDirection(q.correct_answer) }}>{q.correct_answer}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))
-                  ) : (
-                    // Fallback: show all questions individually if no block summaries
-                    currentQuizData.map((q, i) => {
-                      const userAns = userAnswers[i];
-                      const isCorrect = userAns === q.correct_answer;
-                      const dir = getTextDirection(q.question);
-
-                      return (
-                        <div
-                          key={i}
-                          className={`quiz-result-box ${isCorrect ? 'correct' : 'wrong'}`}
-                        >
-                          <div className="flex items-start gap-3 mb-4">
-                            {isCorrect ? (
-                              <div className="quiz-result-icon-wrapper correct">
-                                <CheckCircle size={24} className="quiz-result-icon correct" />
-                              </div>
-                            ) : (
-                              <div className="quiz-result-icon-wrapper wrong">
-                                <XCircle size={24} className="quiz-result-icon wrong" />
-                              </div>
-                            )}
-                            <p
-                              className="quiz-result-question"
-                              style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
-                            >
-                              {i + 1}. {q.question}
-                            </p>
-                          </div>
-
-                          <div className="ml-11 space-y-3">
-                            {userAns && (
-                              <div className={`quiz-answer-box ${isCorrect ? 'correct' : 'wrong'}`}>
-                                <span className={`quiz-answer-label ${isCorrect ? 'correct' : 'wrong'}`}>Your answer: </span>
-                                <span
-                                  className={`quiz-answer-text ${isCorrect ? 'correct' : 'wrong'}`}
-                                  style={{ direction: getTextDirection(userAns) }}
-                                >
-                                  {userAns}
-                                </span>
-                              </div>
-                            )}
-                            {!userAns && (
-                              <div className="quiz-answer-box not-answered">
-                                <span className="quiz-answer-label not-answered">Not answered</span>
-                              </div>
-                            )}
-                            {!isCorrect && (
-                              <div className="quiz-answer-box correct">
-                                <span className="quiz-answer-label correct">Correct answer: </span>
-                                <span
-                                  className="quiz-answer-text correct"
-                                  style={{ direction: getTextDirection(q.correct_answer) }}
-                                >
-                                  {q.correct_answer}
-                                </span>
-                              </div>
-                            )}
-                            {q.explanation && (
-                              <div className="quiz-explanation-box">
-                                <span className="quiz-explanation-label">Explanation: </span>
-                                <span
-                                  className="quiz-explanation-text"
-                                  style={{ direction: getTextDirection(q.explanation) }}
-                                >
-                                  {q.explanation}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={resetQuiz}
-                    className="flex-1 btn btn-primary h-12"
-                  >
-                    Try Again
-                  </button>
-                  <button
-                    onClick={backToQuizTypes}
-                    className="flex-1 btn bg-white/10 hover:bg-white/20 border border-white/10 h-12"
-                  >
-                    Back to Quizzes
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            // Active Quiz
-            <div className="max-w-4xl mx-auto p-6">
-              <div className="bg-surface border border-white/10 rounded-xl p-6 mb-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2 text-muted">
-                    <span className="text-2xl font-bold text-white">{currentQuestionIndex + 1}</span>
-                    <span>/</span>
-                    <span>{currentQuizData.length}</span>
+                        ))
+                    ) : (
+                      <p className="text-center text-muted py-8 font-arabic">لا يوجد ملخص لهذا القسم.</p>
+                    )}
                   </div>
 
-                  {timerActive && (
-                    <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${quizTimer < 60 ? 'bg-red-500/20 text-red-400' : 'bg-primary/20 text-primary'
-                      }`}>
-                      <Clock size={18} />
-                      <span className="font-mono font-bold">{formatTime(quizTimer)}</span>
+                  <div className="space-y-6 mb-12">
+                    <h4 className="text-xl font-bold text-main flex items-center justify-end gap-3 mb-6" dir="rtl">
+                      مراجعة الأسئلة
+                      <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center text-primary">
+                        <BookOpen size={20} />
+                      </div>
+                    </h4>
+                    <div className="flex flex-col gap-6">
+                      {currentQuizData.map((q, i) => {
+                        const isCorrect = userAnswers[i] === q.correct_answer;
+                        return (
+                          <div key={i} className={`p-6 rounded-2xl border transition-all ${isCorrect ? 'border-success/20 bg-success/5' : 'border-error/20 bg-error/5'}`}>
+                            <div className="flex justify-between items-start gap-4 mb-4">
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider font-arabic ${isCorrect ? 'bg-success/20 text-success' : 'bg-error/20 text-error'}`} dir="rtl">
+                                السؤال {i + 1} • {isCorrect ? 'صحيح' : 'خطأ'}
+                              </span>
+                            </div>
+                            <p className="font-arabic text-xl mb-6 text-main leading-relaxed" dir="rtl">{q.question}</p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className={`p-4 rounded-xl flex flex-col gap-1 items-end ${isCorrect ? 'bg-success/10' : 'bg-error/10'}`}>
+                                <span className="text-[10px] uppercase font-black opacity-50 tracking-tighter font-arabic">إجابتك</span>
+                                <span className="font-arabic text-sm">{userAnswers[i] || 'بدون إجابة'}</span>
+                              </div>
+                              {!isCorrect && (
+                                <div className="p-4 rounded-xl bg-success/10 flex flex-col gap-1 items-end">
+                                  <span className="text-[10px] uppercase font-black opacity-50 tracking-tighter font-arabic">الإجابة الصحيحة</span>
+                                  <span className="font-arabic text-sm text-success font-bold">{q.correct_answer}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {q.explanation && (
+                              <div className="mt-4 p-4 rounded-xl bg-primary/5 border border-primary/10 text-right" dir="rtl">
+                                <span className="text-[10px] uppercase font-black text-primary opacity-60 tracking-tighter block mb-1 font-arabic">التوضيح</span>
+                                <p className="text-sm font-arabic leading-relaxed text-muted/80">{q.explanation}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <button
+                      onClick={resetQuiz}
+                      className="btn btn-premium-primary flex-1 h-14 text-lg font-bold font-arabic"
+                    >
+                      <Play size={20} />
+                      إعادة الاختبار
+                    </button>
+                    <button
+                      onClick={backToQuizTypes}
+                      className="btn btn-premium-secondary flex-1 h-14 text-lg font-bold font-arabic"
+                    >
+                      <ArrowLeft size={20} className="rotate-180" />
+                      العودة للمواد
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            // Quiz Logic
+            <div className="quiz-container animate-fade-in" style={{ maxWidth: '48rem', margin: '0 auto' }}>
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="px-4 py-2 rounded-xl bg-surface border text-xs font-bold text-main">
+                    Question <span className="text-primary">{currentQuestionIndex + 1}</span> / {currentQuizData.length}
+                  </div>
+                  {quizTimer > 0 && (
+                    <div className={`flex items-center gap-2 font-mono text-sm px-4 py-2 rounded-xl bg-surface border ${quizTimer < 60 ? 'text-error animate-pulse border-error/20' : 'text-muted'}`}>
+                      <Clock size={14} />
+                      {formatTime(quizTimer)}
                     </div>
                   )}
+                  {currentQuizData[currentQuestionIndex]?.translationQuestion && (
+                    <button
+                      onClick={() => setShowQuestionTranslation(!showQuestionTranslation)}
+                      className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl border transition-all ${showQuestionTranslation ? 'bg-primary text-white border-primary' : 'bg-surface text-muted hover:text-white border-white/10'}`}
+                    >
+                      <BookOpen size={14} />
+                      <span>{showQuestionTranslation ? 'AR' : 'EN'}</span>
+                    </button>
+                  )}
                 </div>
+                <button
+                  onClick={resetQuiz}
+                  className="w-10 h-10 rounded-xl bg-surface border flex items-center justify-center text-muted hover:text-white transition-all hover:bg-error/10 hover:border-error/20"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
-                <div className="mb-4">
-                  {(() => {
-                    const q = currentQuizData[currentQuestionIndex];
-                    const showTrans = questionTranslationEnabled.has(currentQuestionIndex) && !!q?.translationQuestion;
-                    const displayQuestion = showTrans ? q.translationQuestion || q.question : q.question;
-                    const dir = getTextDirection(displayQuestion || '');
+              <div className="quiz-progress-wrapper mb-8">
+                <div
+                  className="quiz-progress-bar"
+                  style={{ width: `${((currentQuestionIndex + 1) / currentQuizData.length) * 100}%` }}
+                />
+              </div>
+
+              <div className="bg-surface border rounded-3xl p-8 mb-8 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 blur-3xl rounded-full -mr-16 -mt-16"></div>
+                <h3 className={`text-2xl md:text-3xl font-bold text-main leading-relaxed mb-10 ${showQuestionTranslation ? 'font-arabic text-right' : 'text-left'}`} dir={showQuestionTranslation ? "rtl" : "ltr"}>
+                  {showQuestionTranslation
+                    ? (currentQuizData[currentQuestionIndex]?.translationQuestion || currentQuizData[currentQuestionIndex]?.question)
+                    : currentQuizData[currentQuestionIndex]?.question}
+                </h3>
+
+                <div className="grid gap-3">
+                  {(showQuestionTranslation && currentQuizData[currentQuestionIndex]?.translationChoices
+                    ? currentQuizData[currentQuestionIndex].translationChoices
+                    : currentQuizData[currentQuestionIndex]?.choices
+                  )?.map((choice, i) => {
+                    // We must map the visual choice back to the original answer for logic matching
+                    // BUT since we shuffled both arrays synchronously, the index 'i' corresponds to the same option in both arrays.
+                    // The 'userAnswers' stores the ENGLISH text of the selected answer.
+                    // So when rendering Arabic, we must check if the English corresponding choice is selected.
+
+                    const englishChoice = currentQuizData[currentQuestionIndex]?.choices[i];
+                    const isSelected = userAnswers[currentQuestionIndex] === englishChoice;
+
                     return (
-                      <div>
-                        <p
-                          className="text-xl font-medium text-white leading-relaxed"
-                          style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
-                        >
-                          {displayQuestion}
-                        </p>
-                        {/* Per-question translation toggle button */}
-                        {currentQuizData[currentQuestionIndex]?.translationQuestion && (() => {
-                          const enabled = questionTranslationEnabled.has(currentQuestionIndex);
-                          return (
-                              <button
-                                onClick={() => {
-                                  const s = new Set(questionTranslationEnabled);
-                                  if (s.has(currentQuestionIndex)) s.delete(currentQuestionIndex);
-                                  else s.add(currentQuestionIndex);
-                                  setQuestionTranslationEnabled(s);
-                                }}
-                                className={`ml-0 mt-2 translation-toggle ${enabled ? 'on' : 'off'}`}
-                              >
-                                {enabled ? (
-                                  <>
-                                    <CheckCircle size={14} />
-                                    <span>Translation: On</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <EyeOff size={14} />
-                                    <span>Translation: Off</span>
-                                  </>
-                                )}
-                              </button>
-                          );
-                        })()}
-                      </div>
+                      <button
+                        key={i}
+                        onClick={() => selectAnswer(englishChoice)}
+                        className={`quiz-choice ${showQuestionTranslation ? 'text-right flex-row-reverse' : 'text-left flex-row'} flex items-center gap-6 p-6 rounded-2xl ${isSelected ? 'selected' : ''}`}
+                      >
+                        <span className={`w-10 h-10 rounded-xl flex items-center justify-center border text-lg font-black transition-all ${isSelected ? 'bg-primary border-transparent text-white' : 'bg-white/5 border-white/10 text-muted'}`}>
+                          {String.fromCharCode(65 + i)}
+                        </span>
+                        <span className={`flex-1 text-lg ${showQuestionTranslation ? 'font-arabic' : ''}`}>{choice || englishChoice}</span>
+                      </button>
                     );
-                  })()}
+                  })}
                 </div>
+              </div>
 
-                <div className="quiz-choices-container mb-8">
-                  {(() => {
-                    const q = currentQuizData[currentQuestionIndex];
-                    const showTrans = questionTranslationEnabled.has(currentQuestionIndex) && !!q?.translationChoices;
-                    const choicesList = showTrans ? (q.translationChoices || []) : (q.choices || []);
-                    return choicesList.map((choice, idx) => {
-                      const isSelected = userAnswers[currentQuestionIndex] === choice;
-                      const dir = getTextDirection(choice);
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => selectAnswer(choice)}
-                          className={`quiz-choice${isSelected ? ' selected' : ''}`}
-                          style={{ direction: dir, textAlign: dir === 'rtl' ? 'right' : 'left' }}
-                        >
-                          {choice}
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => navigateQuestion(-1)}
-                    disabled={currentQuestionIndex === 0}
-                    className="btn bg-white/10 hover:bg-white/20 border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ArrowLeft size={18} />
-                    Previous
-                  </button>
-
-                  <button
-                    onClick={() => navigateQuestion(1)}
-                    disabled={userAnswers[currentQuestionIndex] === null}
-                    className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {currentQuestionIndex === currentQuizData.length - 1 ? 'Finish' : 'Next'}
-                    {currentQuestionIndex !== currentQuizData.length - 1 && <ArrowRight size={18} />}
-                  </button>
-                </div>
-
-                {userAnswers[currentQuestionIndex] === null && (
-                  <p className="text-sm text-muted text-center mt-2">
-                    Please select an answer to continue
-                  </p>
-                )}
+              <div className="flex gap-4">
+                <button
+                  onClick={() => navigateQuestion(-1)}
+                  disabled={currentQuestionIndex === 0}
+                  className="btn btn-premium-secondary flex-1 h-16 rounded-2xl"
+                >
+                  <ArrowLeft size={20} />
+                  Previous
+                </button>
+                <button
+                  onClick={() => navigateQuestion(1)}
+                  className="btn btn-premium-primary flex-1 h-16 rounded-2xl font-bold"
+                >
+                  {currentQuestionIndex === currentQuizData.length - 1 ? 'Finish Quiz' : 'Next Question'}
+                  <ArrowRight size={20} />
+                </button>
               </div>
             </div>
           )}
         </div>
       </main>
 
-      <PDFViewer pdf={selectedPdf} onClose={() => { setSelectedPdf(null); setViolation(false); }} violation={violation} onViolation={() => setViolation(true)} canDownload={canDownload} />
+      <AppAlert
+        isOpen={appAlert.show}
+        onClose={() => setAppAlert(prev => ({ ...prev, show: false }))}
+        title={appAlert.title}
+        message={appAlert.message}
+        type={appAlert.type}
+      />
 
-      {showPeriodicAnswerModal && periodicAnswerIndex !== null && (
-        <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-md p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-white">Answer Review</h3>
+      <ContributionModal
+        isOpen={showContributionModal}
+        onClose={() => setShowContributionModal(false)}
+        userName={userName}
+        lectureTypes={lectureTypes}
+        showAlert={showAlert}
+      />
+
+      {showPeriodicAnswerModal && periodicBlock && (
+        <div className="modal-overlay animate-fade-in" style={{ zIndex: 430 }}>
+          <div className="periodic-modal animate-scale-in">
+
+            <div className="periodic-header">
+              <div className="w-20 h-20 bg-success/10 rounded-3xl flex items-center justify-center mb-4 text-success border border-success/20 rotate-3 transition-transform hover:rotate-0">
+                <CheckCircle size={40} />
+              </div>
+              <h3 className="text-2xl font-black text-white mb-1 tracking-tight uppercase font-arabic">اكتمل القسم</h3>
+              <p className="text-muted text-sm font-medium font-arabic">تحليل مفصل لآخر 10 إجابات</p>
             </div>
-            <div>
-              <p className="text-lg text-white mb-4" style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].question) }}>
-                {currentQuizData[periodicAnswerIndex].question}
-              </p>
-              <div className="mb-4">
-                <div className="quiz-answer-box correct">
-                  <span className="quiz-answer-label correct">Correct answer: </span>
-                  <span className="quiz-answer-text correct" style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].correct_answer) }}>
-                    {currentQuizData[periodicAnswerIndex].correct_answer}
-                  </span>
-                </div>
-                {currentQuizData[periodicAnswerIndex].explanation && (
-                  <div className="quiz-explanation-box mt-4">
-                    <span className="quiz-explanation-label">Explanation: </span>
-                    <p style={{ direction: getTextDirection(currentQuizData[periodicAnswerIndex].explanation || '') }}>{currentQuizData[periodicAnswerIndex].explanation}</p>
+
+            <div className="periodic-scroll-content custom-scrollbar">
+              {/* Score Card Ratio & Progress */}
+              <div className="periodic-score-card">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-success/5 blur-3xl rounded-full -mr-16 -mt-16"></div>
+
+                <div className="flex justify-between items-end mb-6">
+                  <div className="flex flex-col items-end">
+                    <span className="text-muted font-bold uppercase tracking-widest text-[10px] mb-1 font-arabic">الدقة الإجمالية</span>
+                    <span className="text-4xl font-black text-success tracking-tighter">
+                      {Math.round((periodicBlock.correct / periodicBlock.total) * 100)}%
+                    </span>
                   </div>
-                )}
+                  <div className="text-left">
+                    <span className="text-muted text-[10px] font-bold uppercase block mb-1 font-arabic">الأسئلة</span>
+                    <span className="text-xl font-bold text-white"><span className="text-white/30 text-sm">{periodicBlock.total} /</span> {periodicBlock.correct}</span>
+                  </div>
+                </div>
+
+                <div className="quiz-progress-wrapper h-2 mb-2">
+                  <div
+                    className="quiz-progress-bar"
+                    style={{ width: `${(periodicBlock.correct / periodicBlock.total) * 100}%`, background: 'var(--success)', boxShadow: '0 0 20px rgba(16, 185, 129, 0.4)' }}
+                  />
+                </div>
               </div>
-              <div className="flex gap-3">
-                <button onClick={() => { setShowPeriodicAnswerModal(false); setPeriodicAnswerIndex(null); }} className="btn bg-white/10">Close</button>
-                <button onClick={handlePeriodicContinue} className="btn btn-primary">Continue</button>
+
+              {/* Question Review List */}
+              <div className="space-y-4">
+                <h4 className="periodic-review-title" dir="rtl">
+                  <FileText size={12} className="text-primary" />
+                  مراجعة النتائج
+                </h4>
+                <div className="space-y-4">
+                  {periodicBlock.questions.map((q, i) => {
+                    const isCorrect = periodicBlock.answers[i] === q.correct_answer;
+                    return (
+                      <div key={i} className={`periodic-review-card ${isCorrect ? 'correct' : 'incorrect'}`}>
+                        <div className="flex justify-between items-center mb-4">
+                          <span className="text-[10px] font-black text-white/20 uppercase font-arabic">السؤال {i + 1}</span>
+                          <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full font-arabic ${isCorrect ? 'bg-success/10 text-success border border-success/20' : 'bg-error/10 text-error border border-error/20'}`}>
+                            {isCorrect ? 'صحيح' : 'خطأ'}
+                          </span>
+                        </div>
+                        <p className="font-arabic text-lg mb-5 text-main text-right leading-relaxed" dir="rtl">{q.question}</p>
+                        <div className="space-y-2 border-t border-white/5 pt-4">
+                          <div className="flex justify-between items-center text-sm" dir="rtl">
+                            <span className="text-white/30 text-xs font-arabic">إجابتك</span>
+                            <span className={`font-arabic ${isCorrect ? 'text-success' : 'text-error'}`}>{periodicBlock.answers[i] || 'بدون إجابة'}</span>
+                          </div>
+                          {!isCorrect && (
+                            <>
+                              <div className="flex justify-between items-center text-sm" dir="rtl">
+                                <span className="text-white/30 text-xs font-arabic">الإجابة الصحيحة</span>
+                                <span className="font-arabic text-success font-bold">{q.correct_answer}</span>
+                              </div>
+                              {q.explanation && (
+                                <div className="mt-4 p-4 rounded-2xl bg-primary/5 border border-primary/10 text-right" dir="rtl">
+                                  <span className="text-[10px] uppercase font-black text-primary opacity-60 tracking-widest block mb-1 font-arabic">التوضيح</span>
+                                  <p className="text-xs font-arabic leading-relaxed text-muted/80">{q.explanation}</p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
+            </div>
+
+            <div className="periodic-footer">
+              <button
+                onClick={handlePeriodicContinue}
+                className="btn btn-premium-primary w-full h-16 rounded-2xl text-lg font-bold flex items-center justify-center gap-3 shadow-xl shadow-primary/20"
+              >
+                متابعة الاختبار
+                <ArrowRight size={20} className="rotate-180" />
+              </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {isFocusLost && (
-        <div className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" style={{ backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200000 }}>
-          <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-6 shadow-glow"> <EyeOff size={48} className="text-muted" /> </div>
-          <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Session Paused</h2>
-          <p className="text-muted text-lg mb-8 max-w-md">Focus has been lost. To ensure security, content is hidden while you are away.</p>
-          <button onClick={() => setIsFocusLost(false)} className="btn btn-primary px-8 py-3 h-auto text-lg rounded-full">Resume Session</button>
-        </div>
-      )}
-
-      {isPermanentlyBlocked && (
-        <div className="fixed inset-0 flex flex-col items-center justify-center text-center p-8 animate-fade-in select-none" style={{ backgroundColor: 'rgba(127, 29, 29, 0.5)', backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', zIndex: 200001 }}>
-          <div className="w-24 h-24 rounded-full bg-error/20 border border-error/30 flex items-center justify-center mb-6 shadow-glow-error"> <ShieldAlert size={48} className="text-error" /> </div>
-          <h2 className="text-4xl font-bold text-white mb-2 tracking-tight">Access Revoked</h2>
-          <p className="text-red-200 text-lg mb-8 max-w-md">Your account has been blocked by an administrator. Please contact support for further information.</p>
-          <button onClick={async () => { await signOut(auth); onLogout(); }} className="btn btn-danger px-8 py-3 h-auto text-lg rounded-full flex items-center gap-2"> <LogOut size={20} /> Acknowledge & Sign Out </button>
         </div>
       )}
 
       {showAdminLogin && (
-        <div className="modal-overlay animate-fade-in">
-          <div className="admin-login-modal modal-content p-8 relative">
-            <button onClick={() => setShowAdminLogin(false)} className="btn-icon absolute top-4 right-4 z-10"><X size={20} /></button>
-            <div className="admin-login-container">
-              <div className="admin-login-image">
-                <img src="https://avatars.githubusercontent.com/u/146881507?v=4" alt="Security" />
-              </div>
-              <div className="admin-login-form">
-                <h2 className="text-3xl font-bold text-white mb-2">Management Access</h2>
-                <p className="text-sm text-white mb-6" style={{ lineHeight: '1.6' }}>
-                  Getting in while it's none of your business, will cause you trouble!
-                </p>
-                <div className="flex flex-col gap-4">
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={18} />
-                    <input
-                      ref={passwordInputRef}
-                      type="password"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAdminLoginSubmit()}
-                      placeholder="Security Code"
-                      className="login-input pl-12 w-full"
-                    />
-                  </div>
-                  {adminError && <div className="text-xs text-error py-2 px-4 bg-red-500/10 rounded-lg border border-red-500/20 text-center">{adminError}</div>}
-                  <button
-                    onClick={handleAdminLoginSubmit}
-                    disabled={adminLoading}
-                    className="btn btn-primary w-full"
-                  >
-                    {adminLoading ? <Loader2 size={20} className="animate-spin" /> : 'Authenticate'}
-                  </button>
-                </div>
-              </div>
+        <div className="modal-overlay animate-fade-in" style={{ zIndex: 550 }}>
+          <div className="modal-content modal-sm p-8">
+            <h3 className="text-xl font-bold mb-2">Admin Access</h3>
+            <p className="text-sm text-muted mb-6">Password required to enter management</p>
+            <input
+              ref={passwordInputRef}
+              type="password"
+              className="input mb-4"
+              value={adminPassword}
+              onChange={e => setAdminPassword(e.target.value)}
+              placeholder="••••••••"
+              onKeyDown={e => e.key === 'Enter' && handleAdminLoginSubmit()}
+            />
+            {adminError && <p className="text-error text-xs mb-4">{adminError}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setShowAdminLogin(false)} className="btn btn-secondary flex-1">Cancel</button>
+              <button
+                onClick={handleAdminLoginSubmit}
+                disabled={adminLoading}
+                className="btn btn-primary flex-1"
+              >
+                {adminLoading ? '...' : 'Verify'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {showNotificationModal && (
-        <div className="modal-overlay animate-fade-in">
-          <div className="modal-content modal-md p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-white">تفعيل الإشعارات</h3>
+      {isPermanentlyBlocked && (
+        <div className="fixed inset-0 z-[800] bg-black flex items-center justify-center p-8 text-center">
+          <div className="max-w-md">
+            <ShieldAlert size={80} className="text-error mx-auto mb-6" />
+            <h1 className="text-4xl font-bold text-error mb-4 uppercase tracking-tighter">Permanently Blocked</h1>
+            <p className="text-lg text-white/50 mb-8 leading-relaxed">
+              This device has been restricted from accessing the service due to repeated security policy violations.
+            </p>
+            <div className="w-16 h-1 bg-error/30 mx-auto"></div>
+          </div>
+        </div>
+      )}
+
+      {selectedPdf && (
+        <PDFViewer
+          pdf={selectedPdf}
+          onClose={() => setSelectedPdf(null)}
+          violation={violation}
+          onViolation={() => setViolation(true)}
+          canDownload={canDownload}
+        />
+      )}
+
+      {isFocusLost && !isPermanentlyBlocked && (
+        <div className="fixed inset-0 z-[1000] bg-black flex items-center justify-center p-8 text-center" style={{ backdropFilter: 'blur(100px)', WebkitBackdropFilter: 'blur(100px)', position: 'fixed', top: 0, right: 0, zIndex: 1000 }}>
+          <div className="max-w-xl w-full">
+            <div className="mb-10 relative">
+              <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full"></div>
+              <EyeOff size={100} className="text-primary mx-auto relative opacity-80 animate-pulse" />
             </div>
-            <div className="text-center">
-              <p className="text-muted mb-6 text-lg">
-                يجب تفعيل الإشعارات للحصول على تحديثات مهمة حول الملفات والأحداث.
-              </p>
-              <button
-                onClick={async () => {
-                  if ('Notification' in window) {
-                    const permission = await Notification.requestPermission();
-                    if (permission === 'granted') {
-                      setShowNotificationModal(false);
-                    }
-                  }
-                }}
-                className="btn btn-primary w-full"
-              >
-                تفعيل الإشعارات
-              </button>
-              {Notification.permission === 'denied' && (
-                <p className="text-error mt-4 text-sm">
-                  تم رفض الإشعارات. يرجى تفعيلها من إعدادات المتصفح.
-                </p>
-              )}
-            </div>
+            <h2 className="text-5xl font-black text-white mb-6 tracking-tighter uppercase">Session Paused</h2>
+            <p className="text-white/40 text-xl mb-16 leading-relaxed max-w-lg mx-auto font-medium">
+              For your security, content is hidden while the application is not in focus.
+            </p>
+            <button
+              onClick={() => setIsFocusLost(false)}
+              className="btn btn-premium-primary px-16 h-20 rounded-3xl text-2xl font-black shadow-2xl shadow-primary/40 transform hover:scale-105 active:scale-95 transition-all"
+            >
+              RESUME SESSION
+            </button>
           </div>
         </div>
       )}

@@ -10,15 +10,15 @@ interface ScreenshotGuardProps {
 /**
  * ScreenshotGuard Component
  * 
- * SMART Detection - Only triggers on actual screenshot attempts:
- * 1. Rapid visibility flicker (hidden then visible within 300ms) - screenshot pattern
- * 2. Print Screen and screenshot keyboard shortcuts
- * 3. Print attempts (Ctrl+P / beforeprint)
+ * IMPLEMENTS CONTENT PROTECTION DETERRENTS:
+ * 1. Focus Protection: Blurs content when window loses focus.
+ * 2. Shortcut Blocking: Intercepts common capture keys (PrintScreen, Ctrl+S, etc).
+ * 3. Context Menu: Disables right-click to prevent "Save Image As".
+ * 4. Dynamic Watermark: Overlays user identity to discourage sharing.
+ * 5. Visibility Protection: Hides content when tab is backgrounded.
  * 
- * Does NOT trigger on:
- * - Normal tab switching
- * - Leaving the app
- * - Switching to another window
+ * NOTE: These are deterrents, not absolute preventions. 
+ * Browsers sandboxing limits complete control over the OS-level clipboard or screenshots.
  */
 export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
   children,
@@ -27,8 +27,20 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
 }) => {
   const [screenshotAttempt, setScreenshotAttempt] = useState(false);
   const [attemptCount, setAttemptCount] = useState(0);
+  const [isBlurred, setIsBlurred] = useState(false);
+  const [isContentHidden, setIsContentHidden] = useState(false);
+  const [watermarkText, setWatermarkText] = useState('');
+
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hiddenTimestampRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // Generate Watermark Text
+    const num = localStorage.getItem("Number") || "Session";
+    const name = localStorage.getItem("Name") || "User";
+    const device = localStorage.getItem("DeviceName") || "Device";
+    setWatermarkText(`${num} • ${name} • ${device} • ${new Date().toLocaleDateString()}`);
+  }, []);
 
   // Show warning and auto-hide after duration
   const showWarning = useCallback(() => {
@@ -48,46 +60,47 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
     if (!enabled) return;
 
     /**
-     * SMART Visibility Detection
-     * 
-     * Screenshots on mobile typically cause a rapid "flicker":
-     * - Page goes hidden briefly (screen flash)
-     * - Page comes back visible very quickly (< 300ms)
-     * 
-     * Normal behavior (tab switching, leaving app):
-     * - Page goes hidden and STAYS hidden for longer
-     * - User intentionally left, so don't trigger
+     * 1 & 5. Visibility & Focus Protection
+     * Handles tab switching, minimizing, and window focus loss.
      */
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Page just became hidden - record the timestamp
+        // Page hidden (Tab switch/minimized) - Hide content immediately
+        // This helps prevent "Last state" screenshots in mobile app switchers
+        setIsContentHidden(true);
         hiddenTimestampRef.current = Date.now();
       } else {
-        // Page became visible again
+        // Page visible
+        setIsContentHidden(false);
         if (hiddenTimestampRef.current !== null) {
           const hiddenDuration = Date.now() - hiddenTimestampRef.current;
-
-          // If hidden for less than 300ms, it's likely a screenshot flicker
-          // Normal tab switching takes longer than this
+          // Fast flicker detection for screenshots (< 300ms)
           if (hiddenDuration < 300) {
             showWarning();
           }
-
           hiddenTimestampRef.current = null;
         }
       }
     };
 
+    const handleWindowBlur = () => {
+      // Window lost focus (User clicked away / Alt-Tab)
+      // Apply blur filter deterrent
+      setIsBlurred(true);
+    };
+
+    const handleWindowFocus = () => {
+      setIsBlurred(false);
+    };
+
     /**
-     * Keyboard Shortcut Prevention (Desktop)
-     * These are definite screenshot attempts
+     * 2. Keyboard Shortcut Prevention
      */
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Print Screen key
+      // Print Screen
       if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
         e.preventDefault();
         showWarning();
-        // Clear clipboard
         navigator.clipboard?.writeText('').catch(() => { });
         return false;
       }
@@ -99,15 +112,22 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
         return false;
       }
 
-      // Mac Screenshot: Cmd + Shift + 3 or Cmd + Shift + 4
+      // Mac Screenshot: Cmd + Shift + 3 or 4
       if (e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4')) {
         e.preventDefault();
         showWarning();
         return false;
       }
 
-      // Ctrl + P (Print - can be used to save as PDF)
-      if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+      // Save: Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        showWarning();
+        return false;
+      }
+
+      // Print: Ctrl+P / Cmd+P
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         showWarning();
         return false;
@@ -115,23 +135,29 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
     };
 
     /**
-     * Before Print Detection
-     * Definite capture attempt
+     * 3. Context Menu Prevention
      */
-    const handleBeforePrint = () => {
-      showWarning();
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      return false;
     };
 
     // Add event listeners
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('keydown', handleKeyDown, true);
-    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('keydown', handleKeyDown, true); // Capture phase
+    window.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('beforeprint', () => showWarning());
 
     // Cleanup
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('keydown', handleKeyDown, true);
-      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('beforeprint', () => showWarning());
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -139,18 +165,34 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
     };
   }, [enabled, showWarning]);
 
-  // CSS-based protection styles
+  // CSS for protection
   const protectionStyles: React.CSSProperties = enabled ? {
     WebkitUserSelect: 'none',
     userSelect: 'none',
     WebkitTouchCallout: 'none',
+    filter: isBlurred || isContentHidden ? 'blur(20px)' : 'none',
+    transition: 'filter 0.3s ease',
+    opacity: isContentHidden ? 0.1 : 1, // Dim if hidden
   } : {};
 
   return (
-    <div style={protectionStyles} className="screenshot-guard-wrapper">
-      {children}
+    <div className="screenshot-guard-wrapper relative overflow-hidden">
+      {/* 4. Dynamic Watermark */}
+      {enabled && (
+        <div className="watermark-container pointer-events-none fixed inset-0 z-[500] flex flex-wrap content-center justify-center gap-24 opacity-[0.03] select-none overflow-hidden" style={{ transform: 'rotate(-15deg) scale(1.2)' }}>
+          {Array.from({ length: 20 }).map((_, i) => (
+            <div key={i} className="text-4xl font-black text-white whitespace-nowrap">
+              {watermarkText}
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Screenshot Detection Overlay */}
+      <div style={protectionStyles} className="relative z-10 h-full w-full">
+        {children}
+      </div>
+
+      {/* Screenshot Alert Overlay */}
       {screenshotAttempt && (
         <div className="screenshot-guard-overlay">
           <div className="screenshot-guard-content">
@@ -160,11 +202,11 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
             </div>
             <h2 className="screenshot-guard-title">Screenshot Blocked</h2>
             <p className="screenshot-guard-message">
-              Screenshots are not allowed for this content
+              Content is protected. Screenshots are disabled.
             </p>
             <div className="screenshot-guard-warning">
               <AlertTriangle size={16} />
-              <span>This attempt has been recorded</span>
+              <span>Security Event Logged</span>
             </div>
             {attemptCount > 1 && (
               <p className="screenshot-guard-attempts">
@@ -175,13 +217,13 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
         </div>
       )}
 
-      {/* CSS protection layer */}
       <style>{`
         .screenshot-guard-wrapper {
           position: relative;
+          height: 100%;
+          width: 100%;
         }
         
-        /* Make content unselectable */
         .screenshot-guard-wrapper * {
           -webkit-user-select: none !important;
           -moz-user-select: none !important;
@@ -189,15 +231,17 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
           user-select: none !important;
           -webkit-touch-callout: none !important;
         }
-        
-        /* Allow selection in input fields */
+
         .screenshot-guard-wrapper input,
         .screenshot-guard-wrapper textarea {
           -webkit-user-select: text !important;
           user-select: text !important;
         }
         
-        /* Overlay styles */
+        .watermark-container {
+          pointer-events: none;
+        }
+
         .screenshot-guard-overlay {
           position: fixed;
           top: 0;
@@ -206,104 +250,33 @@ export const ScreenshotGuard: React.FC<ScreenshotGuardProps> = ({
           bottom: 0;
           width: 100vw;
           height: 100vh;
-          background: linear-gradient(135deg, rgba(0, 0, 0, 0.98) 0%, rgba(30, 0, 0, 0.98) 100%);
-          z-index: 999999;
+          background: rgba(0,0,0,0.95);
+          z-index: 99999;
           display: flex;
           align-items: center;
           justify-content: center;
-          animation: screenshotGuardFadeIn 0.15s ease-out;
           backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          animation: fadeIn 0.15s ease-out;
         }
         
-        @keyframes screenshotGuardFadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
+        /* ... Reuse styles from previous ... */
         .screenshot-guard-content {
-          text-align: center;
-          padding: 2rem;
-          animation: screenshotGuardSlideUp 0.3s ease-out;
+           text-align: center;
+           padding: 2rem;
         }
         
-        @keyframes screenshotGuardSlideUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .screenshot-guard-icon-container {
-          position: relative;
-          display: inline-block;
-          margin-bottom: 1.5rem;
-        }
-        
-        .screenshot-guard-icon {
-          color: #ef4444;
-          animation: screenshotGuardPulse 1s ease-in-out infinite;
-        }
-        
-        .screenshot-guard-camera-icon {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          color: #ef4444;
-          opacity: 0.3;
-        }
-        
-        @keyframes screenshotGuardPulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.1); opacity: 0.8; }
-        }
-        
-        .screenshot-guard-title {
-          font-size: 2rem;
-          font-weight: 800;
-          color: #ef4444;
-          margin: 0 0 0.75rem 0;
-          text-transform: uppercase;
-          letter-spacing: 2px;
-        }
-        
-        .screenshot-guard-message {
-          font-size: 1rem;
-          color: rgba(255, 255, 255, 0.7);
-          margin: 0 0 1.5rem 0;
-        }
-        
-        .screenshot-guard-warning {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.5rem;
-          background: rgba(245, 158, 11, 0.2);
-          border: 1px solid rgba(245, 158, 11, 0.3);
-          color: #fbbf24;
-          padding: 0.5rem 1rem;
-          border-radius: 9999px;
-          font-size: 0.875rem;
-        }
-        
-        .screenshot-guard-attempts {
-          margin-top: 1rem;
-          font-size: 0.75rem;
-          color: rgba(255, 255, 255, 0.4);
-        }
-        
-        /* Print protection */
+        .screenshot-guard-icon { color: #ef4444; animation: pulse 2s infinite; }
+        .screenshot-guard-camera-icon { position: absolute; top:50%; left:50%; transform:translate(-50%,-50%); opacity:0.3; color:#ef4444; }
+        .screenshot-guard-title { font-size: 2rem; font-weight:800; color:#ef4444; margin-bottom:1rem; text-transform:uppercase; }
+        .screenshot-guard-message { font-size: 1.1rem; color: #aaa; margin-bottom:1.5rem; }
+        .screenshot-guard-warning { display:inline-flex; align-items:center; gap:0.5rem; background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); color:#ef4444; padding:0.5rem 1rem; border-radius:100px; font-size:0.875rem; }
+        .screenshot-guard-attempts { margin-top:1rem; color:#666; font-size:0.75rem; }
+
+        @keyframes pulse { 0% { transform: scale(1); opacity:1; } 50% { transform: scale(1.1); opacity:0.7; } 100% { transform: scale(1); opacity:1; } }
+        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+
         @media print {
-          .screenshot-guard-wrapper { display: none !important; }
-          body::before {
-            content: "Printing is not allowed";
-            display: flex;
-            width: 100vw;
-            height: 100vh;
-            background: #000;
-            color: #fff;
-            font-size: 2rem;
-            align-items: center;
-            justify-content: center;
-          }
+          html { display: none !important; }
         }
       `}</style>
     </div>

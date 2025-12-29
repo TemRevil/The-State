@@ -139,65 +139,58 @@ export const UsageToast: React.FC = () => {
     return (
         <div
             ref={toastRef}
-            className={`usage-toast ${isDragging ? 'usage-toast-dragging' : ''}`}
+            className={`usage-toast-v2 ${isDragging ? 'dragging' : ''}`}
             style={{
-                position: 'fixed',
                 left: `${position.x}px`,
                 top: `${position.y}px`,
-                width: '280px',
-                zIndex: 1000,
-                cursor: isDragging ? 'grabbing' : 'grab'
             }}
         >
-            <div className="usage-toast-container">
-                <div
-                    className="usage-toast-header"
-                    onMouseDown={handleMouseDown}
-                    onTouchStart={handleTouchStart}
-                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+            <div
+                className="usage-toast-header"
+                onMouseDown={handleMouseDown}
+                onTouchStart={handleTouchStart}
+            >
+                <div className="usage-toast-title">
+                    <div className="status-dot animate-pulse"></div>
+                    <span>Data Traffic</span>
+                </div>
+                <button
+                    onClick={() => trafficWatcher.toggleToast()}
+                    className="usage-toast-close"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
                 >
-                    <div className="usage-toast-title">
-                        <Activity size={16} className="animate-pulse text-primary" />
-                        <span>LIVE TRAFFIC</span>
+                    <X size={14} />
+                </button>
+            </div>
+
+            <div className="usage-toast-body">
+                <div className={`usage-stat-card ${flashReads ? 'usage-flash-blue' : ''}`}>
+                    <div className="usage-stat-label">
+                        <Database size={10} className="text-primary" /> Reads
                     </div>
-                    <button
-                        onClick={() => trafficWatcher.toggleToast()}
-                        className="usage-toast-close"
-                        onMouseDown={(e) => e.stopPropagation()} // Prevent drag when clicking close
-                        onTouchStart={(e) => e.stopPropagation()} // Prevent drag when touching close
-                    >
-                        <X size={14} />
-                    </button>
+                    <span className="usage-stat-value">{stats.reads.toLocaleString()}</span>
                 </div>
 
-                <div className="usage-toast-grid">
-                    <div className={`usage-toast-stat ${flashReads ? 'usage-toast-stat-flash-blue' : ''}`}>
-                        <div className="usage-toast-stat-label">
-                            <Database size={12} /> Reads
-                        </div>
-                        <span className={`usage-toast-stat-value ${flashReads ? 'usage-toast-stat-value-flash' : ''}`} style={{ color: '#60a5fa' }}>{stats.reads}</span>
+                <div className={`usage-stat-card ${flashWrites ? 'usage-flash-amber' : ''}`}>
+                    <div className="usage-stat-label">
+                        <Database size={10} className="text-warning" /> Writes
                     </div>
+                    <span className="usage-stat-value">{stats.writes.toLocaleString()}</span>
+                </div>
 
-                    <div className={`usage-toast-stat ${flashWrites ? 'usage-toast-stat-flash-amber' : ''}`}>
-                        <div className="usage-toast-stat-label">
-                            <Database size={12} /> Writes
-                        </div>
-                        <span className={`usage-toast-stat-value ${flashWrites ? 'usage-toast-stat-value-flash' : ''}`} style={{ color: '#fbbf24' }}>{stats.writes}</span>
+                <div className={`usage-stat-card ${flashDeletes ? 'usage-flash-red' : ''}`}>
+                    <div className="usage-stat-label">
+                        <Trash2 size={10} className="text-error" /> Deletes
                     </div>
+                    <span className="usage-stat-value">{stats.deletes.toLocaleString()}</span>
+                </div>
 
-                    <div className={`usage-toast-stat ${flashDeletes ? 'usage-toast-stat-flash-red' : ''}`}>
-                        <div className="usage-toast-stat-label">
-                            <Trash2 size={12} /> Deletes
-                        </div>
-                        <span className={`usage-toast-stat-value ${flashDeletes ? 'usage-toast-stat-value-flash' : ''}`} style={{ color: '#f87171' }}>{stats.deletes}</span>
+                <div className={`usage-stat-card ${flashBandwidth ? 'usage-flash-emerald' : ''}`}>
+                    <div className="usage-stat-label">
+                        <HardDrive size={10} className="text-success" /> Bandwidth
                     </div>
-
-                    <div className={`usage-toast-stat ${flashBandwidth ? 'usage-toast-stat-flash-emerald' : ''}`}>
-                        <div className="usage-toast-stat-label">
-                            <HardDrive size={12} /> Bandwidth
-                        </div>
-                        <span className={`usage-toast-stat-value ${flashBandwidth ? 'usage-toast-stat-value-flash' : ''}`} style={{ color: '#34d399', fontSize: '0.875rem' }}>{formatBytes(stats.bandwidth)}</span>
-                    </div>
+                    <span className="usage-stat-value" style={{ fontSize: '0.9rem' }}>{formatBytes(stats.bandwidth)}</span>
                 </div>
             </div>
         </div>

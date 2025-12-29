@@ -171,6 +171,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     })();
 
     return () => {
+      // Cancel all active render tasks
+      Object.keys(renderTasks.current).forEach(pageNum => {
+        try {
+          renderTasks.current[parseInt(pageNum)].cancel();
+        } catch (e) { }
+      });
+      renderTasks.current = {};
+      renderedPages.current.clear();
+
       if (pdfDoc && typeof pdfDoc.destroy === 'function') {
         try {
           pdfDoc.destroy();
@@ -181,9 +190,25 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
     };
   }, [pdf]);
 
+  const renderTasks = useRef<{ [key: number]: any }>({});
+  const renderedPages = useRef<Set<string>>(new Set());
+
   // Render all pages for scrolling view
   const renderPage = useCallback(async (pageNum: number) => {
     if (!pdfDoc) return;
+
+    const pageKey = `${pageNum}-${zoom}`;
+    if (renderedPages.current.has(pageKey)) return;
+
+    // If already rendering this page, cancel AND await cleanup
+    if (renderTasks.current[pageNum]) {
+      try {
+        renderTasks.current[pageNum].cancel();
+        // CRITICAL: We MUST wait for the previous render to finish rejection
+        // so that pdf.js internal state releases the canvas.
+        await renderTasks.current[pageNum].promise.catch(() => { });
+      } catch (e) { }
+    }
 
     try {
       const canvasElement = pageCanvasRefs.current[pageNum];
@@ -226,9 +251,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ pdf, onClose, violation, o
         viewport: renderViewport,
       };
 
-      await page.render(renderContext).promise;
-    } catch (err) {
+      const renderTask = page.render(renderContext);
+      renderTasks.current[pageNum] = renderTask;
+
+      await renderTask.promise;
+      renderedPages.current.add(pageKey);
+      delete renderTasks.current[pageNum];
+    } catch (err: any) {
+      if (err.name === 'RenderingCancelledException') {
+        // This is expected when we scroll fast, don't log as error
+        return;
+      }
       console.error(`Error rendering page ${pageNum}:`, err);
+      delete renderTasks.current[pageNum];
     }
   }, [pdfDoc, zoom]);
 

@@ -3,11 +3,13 @@ import { trafficWatcher } from '../utils/firebaseTraffic';
 import { db, storage, auth, functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from '../utils/firebaseMonitored';
-import { query, limit, startAfter, orderBy, getCountFromServer, where, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { query, limit, startAfter, orderBy, getCountFromServer, where, DocumentData, QueryDocumentSnapshot, deleteField, arrayUnion } from 'firebase/firestore';
 import { ref, listAll, getDownloadURL, uploadBytes, deleteObject } from '../utils/firebaseMonitored';
 import { signOut } from 'firebase/auth';
-import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database, ArrowUp, ArrowDown, Activity } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Camera, Settings, LogOut, Search, ShieldAlert, MoreVertical, Trash2, Plus, ArrowLeft, ArrowRight, Upload, X, FileText, Ban, Unlock, Check, BookOpen, Download, List, CheckSquare, Square, ChevronDown, Smartphone, KeyRound, Calendar, Clock, ShieldQuestion, EyeOff, Database, ArrowUp, ArrowDown, Activity, Edit } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { AppAlert } from './AppAlert';
+import { ContributionModal } from './ContributionModal'; // Assuming this is the new name for the modified modal
 
 interface AdminDashboardProps { onBack: () => void; }
 interface NumberData { id: string; number: string; name: string; quizTimes: number; quizEnabled: boolean; pdfDown: boolean; deviceCount?: number; deviceLimit?: number; screenedCount: number; devices?: { Archived?: { [attemptId: string]: { Code: string; Date: string; Time: string; }; } }; }
@@ -16,6 +18,18 @@ interface SnitchData { id: string; loginNumber: string; snitchNumber: string; sn
 interface BrokerData { id: string; number: string; count: number; date: string; time: string; attempts: { Date: string; Time: string; Password?: string; }[]; }
 interface FileData { name: string; type: 'file' | 'folder'; fullPath: string; url?: string; }
 interface LoginAttempt { attemptId: string; deviceId: string; Code: string; Date: string; Time: string; }
+interface PendingQuizData {
+  id: string;
+  ContributorName: string;
+  Number: string;
+  Quiz: {
+    Question: string;
+    Choices: { [key: string]: string };
+    Subject: string;
+    Correct: string;
+    Explanation?: string;
+  };
+}
 
 type ActiveInfo = { type: 'number'; data: NumberData; } | { type: 'broker'; data: BrokerData; };
 
@@ -27,7 +41,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     storage: { daily: { bandwidth: 1024 * 1024 * 1024, operations: 20000 }, total: { stored: 5 * 1024 * 1024 * 1024 } }
   };
 
-  const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase'>('tables');
+  const [activeSection, setActiveSection] = useState<'tables' | 'files' | 'shots' | 'firebase' | 'pending-quizzes'>('tables');
   const [activeTableTab, setActiveTableTab] = useState<'numbers' | 'blocked' | 'snitches' | 'brokers'>('numbers');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -64,6 +78,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadingUsage, setLoadingUsage] = useState(false);
   const [isToastVisible, setIsToastVisible] = useState(true);
+  const [pendingQuizzes, setPendingQuizzes] = useState<PendingQuizData[]>([]);
+  const [isApproving, setIsApproving] = useState<string | null>(null);
+  const [appAlert, setAppAlert] = useState<{ show: boolean; message: string; type?: 'success' | 'error' | 'info' | 'warning'; title?: string }>({ show: false, message: '' });
+
+  // Quiz Contribution/Edit Modal State
+  const [showEditQuizModal, setShowEditQuizModal] = useState(false);
+  const [editingQuiz, setEditingQuiz] = useState<PendingQuizData | null>(null);
+  const [lectureTypes, setLectureTypes] = useState<string[]>([]);
+
+
+  const showAlert = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info', title?: string) => {
+    setAppAlert({ show: true, message, type, title });
+  };
 
   // Modals & UI State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -227,22 +254,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
   }, [debouncedSearchTerm, sortField, sortDirection]);
 
-  // 4. Handle Scroll (Infinite Loading)
-  useEffect(() => {
-    const container = tableContainerRef.current;
-    if (!container || activeTableTab !== 'numbers') return;
-
-    const handleScroll = () => {
-      // Check if near bottom (50px buffer)
-      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) {
-        if (numbersHasMore && !numbersLoadingMore) {
-          loadNumbers(true);
-        }
+  const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 50) {
+      if (!numbersLoadingMore && numbersHasMore && !debouncedSearchTerm) {
+        loadNumbers(true);
       }
-    };
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeTableTab, numbersHasMore, numbersLoadingMore, debouncedSearchTerm, sortField, sortDirection, numbersLastDoc]);
+    }
+  };
+
+
 
   // Sorting Handler
   const handleSort = (field: 'name' | 'quizTimes' | 'screened') => {
@@ -312,6 +333,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
     });
     return () => { u1(); u3(); u4(); unsubscribeNumbers(); };
   }, []);
+
+  // Fetch lecture types for the quiz modal
+  useEffect(() => {
+    const fetchLectureTypes = async () => {
+      try {
+        const docRef = doc(db, "Dashboard", "Admin");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setLectureTypes(docSnap.data().LectureTypes || []);
+        }
+      } catch (error) {
+        console.error("Error fetching lecture types:", error);
+      }
+    };
+    fetchLectureTypes();
+  }, []);
+
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 900);
@@ -433,6 +471,135 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
   const deleteFolderRecursive = async (path: string) => { try { const list = await listAll(ref(storage, path)); await Promise.all(list.items.map(i => deleteObject(i))); await Promise.all(list.prefixes.map(p => deleteFolderRecursive(p.fullPath))); } catch (e) { console.error("Recursive delete failed", e); } };
   const handleBulkFileDelete = async () => { showConfirm(`Delete ${selectedFiles.length} items? This cannot be undone.`, async () => { for (const path of selectedFiles) { const file = files.find(f => f.fullPath === path); if (file?.type === 'folder') { await deleteFolderRecursive(path); } else { try { await deleteObject(ref(storage, path)); } catch { } } } setSelectedFiles([]); loadFiles(currentPath); }); };
 
+  // --- PENDING QUIZZES LOGIC ---
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "Dashboard", "pending-quizi"), (s) => {
+      if (s.exists()) {
+        const data = s.data();
+        const list = Object.entries(data).map(([id, val]: [string, any]) => ({ id, ...val }));
+        setPendingQuizzes(list);
+      } else {
+        setPendingQuizzes([]);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const handleApproveQuiz = async (taskId: string, payload: PendingQuizData['Quiz']) => {
+    setIsApproving(taskId);
+    try {
+      const subject = payload.Subject;
+      const quiziRef = doc(db, "quizi", subject);
+      const quiziSnap = await getDoc(quiziRef);
+
+      let quizzesMap: { [key: string]: any } = {};
+      let nextQuizId: number = 1;
+
+      if (quiziSnap.exists()) {
+        const data = quiziSnap.data();
+        if (data && data.quizzes && Array.isArray(data.quizzes)) {
+          // If 'quizzes' is an array, iterate to find the max ID
+          const maxId = data.quizzes.reduce((max: number, quiz: any) => Math.max(max, quiz.id || 0), 0);
+          nextQuizId = maxId + 1;
+        } else if (data) {
+          // Fallback for older structure where quizzes might be a map or a different structure
+          const keys = Object.keys(data).map(k => parseInt(k)).filter(k => !isNaN(k));
+          // Assuming each top-level numeric key holds a 'quizzes' array, find max ID across all
+          let currentMaxId = 0;
+          keys.forEach(key => {
+            if (data[key] && data[key].quizzes && Array.isArray(data[key].quizzes)) {
+              currentMaxId = Math.max(currentMaxId, data[key].quizzes.reduce((max: number, quiz: any) => Math.max(max, quiz.id || 0), 0));
+            }
+          });
+          nextQuizId = currentMaxId + 1;
+        }
+      }
+
+      const isTrueFalse = Object.keys(payload.Choices).length === 2;
+
+      const newQuestion = {
+        question: payload.Question,
+        options: Object.values(payload.Choices),
+        correctAnswer: payload.Choices[payload.Correct],
+        explanation: payload.Explanation || "",
+        id: nextQuizId, // Use the dynamically determined next ID
+        ...(isTrueFalse && { isTrueFalse }), // Conditionally add isTrueFalse
+      };
+
+      // Ensure 'quizzes' is treated as an array at the root of the subject document
+      await updateDoc(quiziRef, {
+        quizzes: arrayUnion(newQuestion)
+      });
+
+      // Remove from pending
+      const pendingRef = doc(db, "Dashboard", "pending-quizi");
+      await updateDoc(pendingRef, {
+        [taskId]: deleteField()
+      });
+
+      trafficWatcher.logRead(1);
+      trafficWatcher.logWrite(2);
+      showAlert("Question approved and added to " + subject, "success");
+    } catch (e: any) {
+      console.error(e);
+      showAlert("Approval failed: " + e.message, "error");
+    } finally {
+      setIsApproving(null);
+    }
+  };
+
+
+  const handleRejectQuiz = async (taskId: string) => {
+    try {
+      const pendingRef = doc(db, "Dashboard", "pending-quizi");
+      await updateDoc(pendingRef, {
+        [taskId]: deleteField()
+      });
+      showAlert("Question rejected", "info");
+    } catch (e: any) {
+      console.error(e);
+      showAlert("Rejection failed: " + e.message, "error");
+    }
+  };
+
+  const handleEditQuiz = (quiz: PendingQuizData) => {
+    setEditingQuiz(quiz);
+    setShowEditQuizModal(true);
+  };
+
+  const handleSaveEditedQuiz = async (updatedQuizData: any) => {
+    if (!editingQuiz) return;
+
+    try {
+      const pendingRef = doc(db, "Dashboard", "pending-quizi");
+      const updatedPayload = {
+        [editingQuiz.id]: {
+          ...editingQuiz,
+          Quiz: {
+            Question: updatedQuizData.question,
+            Choices: {
+              "1": updatedQuizData.choices[0],
+              "2": updatedQuizData.choices[1],
+              ...(updatedQuizData.choices[2] ? { "3": updatedQuizData.choices[2] } : {}),
+              ...(updatedQuizData.choices[3] ? { "4": updatedQuizData.choices[3] } : {}),
+            },
+            Subject: updatedQuizData.subject,
+            Correct: updatedQuizData.correct,
+            Explanation: updatedQuizData.explanation,
+          }
+        }
+      };
+      await updateDoc(pendingRef, updatedPayload);
+      showAlert("Pending quiz updated successfully.", "success");
+      setShowEditQuizModal(false);
+      setEditingQuiz(null);
+    } catch (e: any) {
+      console.error("Failed to save edited quiz:", e);
+      showAlert("Failed to save edited quiz: " + e.message, "error");
+    }
+  };
+
+
   // --- SHOTS LOGIC ---
   const loadShotsWithOwners = async () => { try { const r = await listAll(ref(storage, 'Captured-Shots')); const raw = await Promise.all(r.items.map(async i => ({ fullPath: i.fullPath, url: await getDownloadURL(i), name: i.name }))); const enhanced = await Promise.all(raw.map(async (s) => { const parts = s.name.split('_'); const ownerNum = parts.length >= 2 ? parts[1] : 'Unknown'; let ownerName = 'Unknown'; try { const d = await getDoc(doc(db, 'Numbers', ownerNum)); if (d.exists()) ownerName = d.data().Name || 'Unknown'; } catch { } return { ...s, ownerNumber: ownerNum, ownerName }; })); setShots(enhanced as any[]); } catch (e) { console.warn('Load shots failed', e); } };
   useEffect(() => { if (activeSection === 'shots') loadShotsWithOwners(); }, [activeSection]);
@@ -513,6 +680,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           <button onClick={() => { setActiveSection('files'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'files' ? 'active' : ''}`}><FolderOpen size={18} /> Files</button>
           <button onClick={() => { setActiveSection('shots'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'shots' ? 'active' : ''}`}><Camera size={18} /> Shots</button>
           <button onClick={() => { setActiveSection('firebase'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'firebase' ? 'active' : ''}`}><Database size={18} /> Firebase</button>
+          <button onClick={() => { setActiveSection('pending-quizzes'); setSidebarOpen(false); }} className={`nav-btn admin-nav-btn ${activeSection === 'pending-quizzes' ? 'active' : ''}`}>
+            <List size={18} />
+            <span>Pending Quizzes</span>
+            {pendingQuizzes.length > 0 && <span className="ml-auto bg-primary text-black text-[10px] font-black px-2 py-0.5 rounded-full">{pendingQuizzes.length}</span>}
+          </button>
         </nav>
         <div className="border-t border-white/10 flex flex-col gap-2 pt-4 mt-auto shrink-0">
           {/* Admin User Info */}
@@ -525,8 +697,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               <span className="text-xs text-success">Admin</span>
             </div>
           </div>
-          <button onClick={onBack} className="nav-btn"><ArrowLeft size={16} /> Back to User View</button>
-          <button onClick={handleLogout} className="nav-btn hover:text-error hover:bg-red-500/10"><LogOut size={16} /> Sign Out</button>
+          <button onClick={onBack} className="nav-btn group hover:bg-white/5 transition-all"><ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> Back to User View</button>
+          <button onClick={handleLogout} className="nav-btn group hover:bg-error/10 hover:text-error transition-all"><LogOut size={16} className="group-hover:rotate-12 transition-transform" /> Sign Out</button>
         </div>
       </aside>
 
@@ -534,29 +706,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
       {/* MAIN */}
       <main className="main-content">
-        <header className="content-header">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">☰</button>
-            <div className="rounded-full bg-surface border border-white/10 flex items-center justify-center text-muted font-bold text-xs" style={{ width: '36px', height: '36px' }}>{adminName.charAt(0).toUpperCase()}</div>
-            <div><h2 className="text-sm font-semibold text-white">Welcome, {adminName.split(' ')[0]}</h2><p className="text-xs text-success">Online</p></div>
+        <header className="content-header p-6">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSidebarOpen(s => !s)} className="mobile-toggle" aria-label="Toggle menu">
+              {sidebarOpen ? <X size={20} /> : <List size={20} />}
+            </button>
+            <div className="rounded-2xl bg-surface border border-white/10 flex items-center justify-center text-primary font-bold shadow-glow" style={{ width: '44px', height: '44px' }}>
+              {adminName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white tracking-tight">Welcome, {adminName.split(' ')[0]}</h2>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-success">System Administrator</p>
+              </div>
+            </div>
           </div>
-          <button onClick={() => setShowSettingsModal(true)} className="btn btn-secondary btn-sm gap-2 text-xs h-9 px-3"><Settings size={14} /> Settings</button>
+          <button onClick={() => setShowSettingsModal(true)} className="btn btn-premium-secondary btn-toolbar gap-2"><Settings size={14} /> Settings</button>
         </header>
 
         <div className="content-body custom-scrollbar">
           {activeSection === 'tables' && (
-            <div className="h-full flex flex-col gap-4">
-              <div className={`table-toolbar justify-between gap-3 ${isMobile ? 'flex-col' : 'flex-row'}`}>
+            <div className="h-full flex flex-col gap-6">
+              <div className={`table-toolbar flex items-center justify-between gap-4 ${isMobile ? 'flex-col' : ''}`}>
                 {isMobile ? (
                   <div className="relative w-full" ref={tableNavRef}>
-                    <button onClick={() => setShowTableNavMenu(!showTableNavMenu)} className="btn btn-secondary btn-toolbar capitalize flex items-center w-full justify-center">
-                      {activeTableTab} <ChevronDown size={16} className={`ml-2 transition-transform ${showTableNavMenu ? 'rotate-180' : ''}`} />
+                    <button onClick={() => setShowTableNavMenu(!showTableNavMenu)} className="btn btn-secondary w-full justify-between">
+                      <span className="capitalize">{activeTableTab}</span>
+                      <ChevronDown size={16} className={`transition-transform ${showTableNavMenu ? 'rotate-180' : ''}`} />
                     </button>
                     {showTableNavMenu && (
-                      <div className="options-menu" style={{ top: '100%', right: 'auto', left: 0, width: '100%', marginTop: '8px', transformOrigin: 'top center' }}>
+                      <div className="options-menu w-full" style={{ left: 0 }}>
                         {tableTabs.map((tab) => (
-                          <button key={tab} onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }} className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/10 text-white' : ''}`}>
-                            {activeTableTab === tab && <Check size={14} />} <span className="flex-1">{tab}</span>
+                          <button key={tab} onClick={() => { setActiveTableTab(tab as any); setShowTableNavMenu(false); }} className={`options-item capitalize ${activeTableTab === tab ? 'bg-white/5 active' : ''}`}>
+                            <span className="flex-1">{tab}</span>
+                            {activeTableTab === tab && <Check size={14} className="text-primary" />}
                           </button>
                         ))}
                       </div>
@@ -564,20 +748,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   </div>
                 ) : (
                   <div className="table-nav">
-                    {tableTabs.map((tab) => (<button key={tab} onClick={() => setActiveTableTab(tab as any)} className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}>{tab}</button>))}
+                    {tableTabs.map((tab) => (
+                      <button key={tab} onClick={() => setActiveTableTab(tab as any)} className={`table-nav-btn capitalize ${activeTableTab === tab ? 'active' : ''}`}>
+                        {tab}
+                      </button>
+                    ))}
                   </div>
                 )}
-                <div className={`flex gap-3 items-center ${isMobile ? 'flex-col w-full' : 'flex-row'}`}>
-                  <div className={`search-container ${isMobile ? 'w-full' : ''}`}>
+
+                <div className={`flex gap-3 items-center ${isMobile ? 'w-full' : ''}`}>
+                  <div className={`search-container ${isMobile ? 'flex-1' : ''}`}>
+                    <input
+                      type="text"
+                      placeholder={`Search ${activeTableTab}...`}
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      className={`search-input ${isMobile ? 'w-full' : ''}`}
+                    />
                     <Search className="search-icon" size={16} />
-                    <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="search-input" />
                   </div>
-                  {activeTableTab === 'numbers' && <button onClick={() => setShowAddModal(true)} className={`btn btn-primary btn-toolbar ${isMobile ? 'w-full' : ''}`}><Plus size={16} /> <span>{isMobile ? 'Add New User' : 'Add'}</span></button>}
+                  {activeTableTab === 'numbers' && (
+                    <button onClick={() => setShowAddModal(true)} className="btn btn-premium-primary btn-toolbar">
+                      <Plus size={16} /> <span>Add User</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
-                <div ref={tableContainerRef} className="absolute inset-0 overflow-auto custom-scrollbar">
+                <div
+                  ref={tableContainerRef}
+                  className="absolute inset-0 overflow-auto custom-scrollbar"
+                  onScroll={handleTableScroll}
+                >
                   <table className="admin-table">
                     <thead>
                       <tr>{activeTableTab === 'numbers' ? (<><th>Number</th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('name')}><div className="flex items-center gap-2">Name {sortField === 'name' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('quizTimes')}><div className="flex items-center gap-2">Quiz Times {sortField === 'quizTimes' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th className="cursor-pointer hover:bg-white/5 select-none" onClick={() => handleSort('screened')}><div className="flex items-center gap-2">Screened {sortField === 'screened' && (sortDirection === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />)}</div></th><th>Quiz</th><th>PDF</th><th className="text-right">Actions</th></>) : activeTableTab === 'blocked' ? (<><th>Number</th><th>Name</th><th>Reason</th><th>Date</th><th>Status</th><th className="text-right">Actions</th></>) : activeTableTab === 'snitches' ? (<><th>Login #</th><th>Snitch #</th><th>Name</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>) : (<><th>Number</th><th>Count</th><th>Date</th><th>Time</th><th>Status</th><th className="text-right">Actions</th></>)}</tr>
@@ -726,7 +929,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   <button onClick={() => uploadInputRef.current?.click()} className="btn btn-primary btn-toolbar"><Upload size={16} /> Upload</button>
                 </div>
               </div>
-              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+              <div className="flex-1 admin-card overflow-hidden relative">
                 {/* File display logic (same as original) */}
                 <div className="absolute inset-0 overflow-auto custom-scrollbar p-4">
                   {fileViewMode === 'grid' ? (
@@ -735,7 +938,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                         const isSelected = selectedFiles.includes(file.fullPath);
                         return (
                           <div key={file.fullPath} onClick={() => file.type === 'folder' && handleFolderClick(file.fullPath)} className={`file-card ${isSelected ? 'selected' : ''}`}>
-                            <div onClick={(e) => { e.stopPropagation(); toggleFileSelection(file.fullPath); }} className="absolute top-2 left-2 p-1 rounded hover:bg-black/50 text-white/50 hover:text-white z-10 cursor-pointer">
+                            <div onClick={(e) => { e.stopPropagation(); toggleFileSelection(file.fullPath); }} className="absolute top-2 left-2 p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white z-20 cursor-pointer transition-colors">
                               {isSelected ? <CheckSquare size={18} className="text-primary" /> : <Square size={18} />}
                             </div>
                             <div className="flex-1 flex items-center justify-center">
@@ -780,7 +983,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           {activeSection === 'shots' && (
             // ... existing shots code ...
             <div className="h-full flex flex-col gap-4">
-              <div className="flex-1 bg-surface border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+              <div className="flex-1 admin-card overflow-hidden relative">
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
                   {shots.length > 0 ? (
                     <div className="w-full max-w-4xl flex flex-col gap-4" style={{ height: '100%' }}>
@@ -796,7 +999,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 </div>
               </div>
               {shots.length > 0 && (
-                <div className={`flex justify-between items-center bg-surface rounded-xl border border-white/10 ${isMobile ? 'p-2 flex-col gap-2' : 'p-4'}`}>
+                <div className={`flex justify-between items-center admin-card px-6 py-4 ${isMobile ? 'flex-col gap-4' : ''}`}>
                   <div>
                     <div className={`font-mono text-muted ${isMobile ? 'text-xs' : 'text-sm'}`}>{shots[currentShotIndex]?.name}</div>
                     <div className="text-xs text-muted">Owner: <span className="text-white">{shots[currentShotIndex]?.ownerName || 'Unknown'}</span> <span className="font-mono text-muted">({shots[currentShotIndex]?.ownerNumber || 'Unknown'})</span></div>
@@ -815,7 +1018,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
               {/* Header & Controls */}
               <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-                <div className="bg-surface border border-white/10 rounded-xl p-4 shadow-2xl flex items-center gap-4 min-w-[200px]">
+                <div className="admin-card p-4 flex items-center gap-4 min-w-[200px]">
                   <div className="p-3 bg-primary/10 rounded-lg text-primary"><Database size={24} /></div>
                   <div className="flex-1">
                     <div className="text-2xl font-bold text-white">
@@ -835,7 +1038,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
                 <div className="flex flex-col gap-2 items-end">
                   <div className="relative w-full sm:w-[220px]">
-                    <button onClick={(e) => { e.stopPropagation(); setShowUsageDropdown(!showUsageDropdown); }} className="btn btn-secondary w-full sm:min-w-[220px] justify-between">
+                    <button onClick={(e) => { e.stopPropagation(); setShowUsageDropdown(!showUsageDropdown); }} className="btn btn-premium-secondary w-full sm:min-w-[220px] justify-between">
                       <span>
                         {usageViewMode === '24h' && 'Last 24 Hours'}
                         {usageViewMode === '7d' && 'Last 7 Days'}
@@ -914,7 +1117,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </div>
 
                     {/* WRITES */}
-                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <div className="admin-card p-6 shadow-2xl">
                       <h3 className="text-lg font-semibold text-white mb-4">
                         Firestore Writes ({firebaseUsage?.firestore?.writes?.total?.toLocaleString() || 0})
                       </h3>
@@ -949,7 +1152,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                   {/* Row 2: Storage */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* BANDWIDTH */}
-                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl">
+                    <div className="admin-card p-6 shadow-2xl">
                       <h3 className="text-lg font-semibold text-white mb-4">
                         Bandwidth ({(firebaseUsage?.storage?.bandwidth?.total / (1024 * 1024)).toFixed(2) || '0'} MB)
                       </h3>
@@ -985,7 +1188,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                     </div>
 
                     {/* STORAGE TOTALS & REQUESTS */}
-                    <div className="bg-surface border border-white/10 rounded-xl p-6 shadow-2xl flex flex-col">
+                    <div className="admin-card p-6 shadow-2xl flex flex-col">
                       <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
                         <div>
                           <h3 className="text-lg font-semibold text-white">Storage Size</h3>
@@ -1029,6 +1232,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               )}
             </div>
           )}
+
+          {activeSection === 'pending-quizzes' && (
+            <div className="h-full flex flex-col gap-6 overflow-y-auto custom-scrollbar pb-10">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-white tracking-tight">Pending Quizi Contributions</h2>
+              </div>
+              {pendingQuizzes.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-muted opacity-50">
+                  <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4">
+                    <List size={40} />
+                  </div>
+                  <p className="text-lg font-medium">No pending contributions for review</p>
+                  <p className="text-sm">New submissions will appear here for verification</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  {pendingQuizzes.map((pq) => (
+                    <div key={pq.id} className="admin-card p-6 flex flex-col">
+                      <div className="flex justify-between items-start mb-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary font-bold shadow-glow text-lg">
+                            {pq.ContributorName?.charAt(0) || '?'}
+                          </div>
+                          <div>
+                            <div className="text-white font-bold">{pq.ContributorName}</div>
+                            <div className="text-[10px] text-muted font-black tracking-widest uppercase">{pq.Number}</div>
+                          </div>
+                        </div>
+                        <div className="px-3 py-1 bg-white/5 rounded-full text-[10px] uppercase font-black text-primary border border-primary/20 tracking-tighter shadow-glow-sm">
+                          {pq.Quiz.Subject}
+                        </div>
+                      </div>
+                      <div className="flex-1 space-y-4">
+                        <div className="p-5 bg-white/5 rounded-2xl border border-white/10 group-hover:border-primary/20 transition-colors">
+                          <div className="text-[9px] text-muted uppercase font-black mb-2 tracking-widest opacity-60">Question Content</div>
+                          <div className="text-xl font-arabic text-right text-white leading-relaxed" dir="rtl">{pq.Quiz.Question}</div>
+                        </div>
+                        {pq.Quiz.Explanation && (
+                          <div className="p-5 bg-white/5 rounded-2xl border border-white/10 group-hover:border-primary/20 transition-colors mb-4">
+                            <div className="text-[9px] text-muted uppercase font-black mb-2 tracking-widest opacity-60">Explanation</div>
+                            <div className="text-sm font-arabic text-right text-white/80 leading-relaxed" dir="rtl">{pq.Quiz.Explanation}</div>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-1 gap-4 mb-6">
+                          {Object.entries(pq.Quiz.Choices).map(([key, text]) => (
+                            <div key={key} className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${pq.Quiz.Correct === key ? 'bg-success/5 border-success/30 shadow-glow-sm' : 'bg-black/20 border-white/5'}`}>
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black ${pq.Quiz.Correct === key ? 'bg-success text-black' : 'bg-white/10 text-muted'}`}>
+                                {key}
+                              </div>
+                              <div className="flex-1 text-base font-arabic text-right text-white/90" dir="rtl">{text as string}</div>
+                              {pq.Quiz.Correct === key && <div className="w-5 h-5 rounded-full bg-success/20 flex items-center justify-center"><Check size={12} className="text-success" /></div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex gap-4 mt-8 pt-6 border-t border-white/5">
+                        <button onClick={() => handleRejectQuiz(pq.id)} className="btn btn-secondary flex-1 text-error hover:bg-error/10 border-error/20 hover:border-error/40 h-12">
+                          <X size={18} /> <span>Reject</span>
+                        </button>
+                        <button onClick={() => handleEditQuiz(pq)} className="btn btn-secondary flex-1 h-12">
+                          <Edit size={18} /> <span>Edit</span>
+                        </button>
+                        <button onClick={() => handleApproveQuiz(pq.id, pq.Quiz)} disabled={isApproving === pq.id} className="btn btn-primary flex-1 h-12 shadow-glow">
+                          {isApproving === pq.id ? 'Approving...' : <><Check size={18} /> <span>Approve</span></>}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -1068,7 +1343,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 )}
               </div>
             </div>
-            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10"><button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-secondary w-full">Close</button></div>
+            <div className="p-6 md:p-8 flex-shrink-0 border-t border-white/10"><button onClick={() => { setShowInfoModal(false); setActiveInfo(null); }} className="btn btn-premium-secondary w-full">Close Information Overlay</button></div>
           </div>
         </div>
       )}
@@ -1079,7 +1354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           <div className="modal-content modal-sm p-8">
             <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-white">Confirm Action</h3><button onClick={() => setShowConfirmModal(false)} className="btn-icon"><X size={20} /></button></div>
             <p className="text-muted mb-8">{confirmMessage}</p>
-            <div className="flex justify-end gap-3"><button onClick={() => setShowConfirmModal(false)} className="btn btn-ghost">Cancel</button><button onClick={() => { onConfirmAction(); setShowConfirmModal(false); }} className="btn btn-danger">Confirm</button></div>
+            <div className="flex justify-end gap-3"><button onClick={() => setShowConfirmModal(false)} className="btn btn-premium-secondary">Cancel</button><button onClick={() => { onConfirmAction(); setShowConfirmModal(false); }} className="btn btn-premium-primary" style={{ background: 'var(--error)' }}>Confirm</button></div>
           </div>
         </div>
       )}
@@ -1090,7 +1365,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
           <div className="modal-content modal-md p-8">
             <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-white">Create New Folder</h3><button onClick={() => setShowFolderModal(false)} className="btn-icon"><X size={20} /></button></div>
             <div className="space-y-4"><input type="text" value={folderName} onChange={e => setFolderName(e.target.value)} placeholder="Folder name" className="login-input w-full" /></div>
-            <div className="flex justify-end gap-3 mt-8"><button onClick={() => setShowFolderModal(false)} className="btn btn-ghost">Cancel</button><button onClick={() => { if (folderName) { handleCreateFolder(folderName); } }} className="btn btn-primary">Create</button></div>
+            <div className="flex justify-end gap-3 mt-8"><button onClick={() => setShowFolderModal(false)} className="btn btn-premium-secondary">Cancel</button><button onClick={() => { if (folderName) { handleCreateFolder(folderName); } }} className="btn btn-premium-primary">Create Folder</button></div>
           </div>
         </div>
       )}
@@ -1107,7 +1382,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               <div className="form-field"><label className="text-xs text-muted block uppercase font-bold tracking-wider">Phone Number</label><input type="text" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Enter 11 digits" className="login-input w-full" /></div>
               <div className="form-field"><label className="text-xs text-muted block uppercase font-bold tracking-wider">PDF Permission</label><div className="relative"><button onClick={() => setShowPdfDropdown(!showPdfDropdown)} className="login-input appearance-none bg-surface cursor-pointer text-left flex items-center justify-between"><span>{newPdfDown ? "Allowed" : "Blocked (Default)"}</span><ChevronDown size={16} className={`text-muted transition-transform ${showPdfDropdown ? 'rotate-180' : ''}`} /></button>{showPdfDropdown && (<div className="pdf-dropdown"><button onClick={() => { setNewPdfDown(false); setShowPdfDropdown(false); }} className="options-item">Blocked (Default)</button><button onClick={() => { setNewPdfDown(true); setShowPdfDropdown(false); }} className="options-item">Allowed</button></div>)}</div></div>
             </div>
-            <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/10"><button onClick={() => setShowAddModal(false)} className="btn btn-ghost">Cancel</button><button onClick={handleCreateUser} className="btn btn-primary">Create User</button></div>
+            <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-white/10"><button onClick={() => setShowAddModal(false)} className="btn btn-premium-secondary">Cancel</button><button onClick={handleCreateUser} className="btn btn-premium-primary">Create User Account</button></div>
           </div>
         </div>
       )}
@@ -1121,13 +1396,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
               <div className="settings-row"><span className="settings-label">Global Quiz Access</span><button onClick={() => setGlobalQuiz(!globalQuiz)} className={`toggle-switch ${globalQuiz ? 'active' : ''}`}><div className="toggle-thumb" /></button></div>
               <div className="settings-row"><span className="settings-label">Global PDF Downloads</span><button onClick={() => setGlobalPdf(!globalPdf)} className={`toggle-switch ${globalPdf ? 'active' : ''}`}><div className="toggle-thumb" /></button></div>
             </div>
-            <div className={`flex items-center ${isMobile ? 'flex-col gap-4' : 'justify-between'}`}>
-              <button onClick={handleClearAllScreened} className={`btn btn-danger ${isMobile ? 'w-full' : ''}`}>Clear All Screened</button>
-              <button onClick={async () => { try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); } catch (e) { console.warn('Failed to save settings', e); } setShowSettingsModal(false); }} className={`btn btn-primary ${isMobile ? 'w-full' : ''}`}>Save Changes</button>
+            <div className={`flex items-center gap-4 ${isMobile ? 'flex-col' : 'justify-between'}`}>
+              <button onClick={handleClearAllScreened} className={`btn btn-premium-secondary text-error ${isMobile ? 'w-full' : ''}`}>Clear All Screened</button>
+              <button
+                onClick={async () => { try { await setDoc(doc(db, 'Dashboard', 'Settings'), { 'PDF-Down': globalPdf, 'Quiz-Enabled': globalQuiz }); } catch (e) { console.warn('Failed to save settings', e); } setShowSettingsModal(false); showAlert("Settings saved successfully", "success"); }}
+                className={`btn btn-premium-primary ${isMobile ? 'w-full' : ''}`}
+              >
+                Save Changes
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* EDIT QUIZ MODAL (using ContributionModal component) */}
+      {showEditQuizModal && editingQuiz && (
+        <ContributionModal
+          isOpen={showEditQuizModal}
+          onClose={() => { setShowEditQuizModal(false); setEditingQuiz(null); }}
+          userName={adminName} // Or current admin's name
+          lectureTypes={lectureTypes}
+          showAlert={showAlert}
+          initialData={{
+            question: editingQuiz.Quiz.Question,
+            choices: Object.values(editingQuiz.Quiz.Choices),
+            correct: editingQuiz.Quiz.Correct,
+            subject: editingQuiz.Quiz.Subject,
+            explanation: editingQuiz.Quiz.Explanation || ''
+          }}
+          onSave={handleSaveEditedQuiz}
+        />
+      )}
+
+      <AppAlert
+        isOpen={appAlert.show}
+        onClose={() => setAppAlert(prev => ({ ...prev, show: false }))}
+        title={appAlert.title}
+        message={appAlert.message}
+        type={appAlert.type}
+      />
     </div>
   );
 };
