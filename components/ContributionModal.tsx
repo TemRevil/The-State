@@ -154,10 +154,10 @@ export const ContributionModal: React.FC<ContributionModalProps> = ({
                             <div ref={subjectDropdownRef} className="relative">
                                 <button
                                     onClick={() => setShowSubjectDropdown(!showSubjectDropdown)}
-                                    className="input flex items-center justify-between text-right"
+                                    className="input flex items-center justify-between text-right gap-2"
                                 >
-                                    <span className="font-arabic">{contributeData.subject || 'اختر المادة...'}</span>
-                                    <ChevronDown size={16} className={`transition-transform ${showSubjectDropdown ? 'rotate-180' : ''}`} />
+                                    <span className="font-arabic overflow-x-auto whitespace-nowrap flex-1 text-left custom-scrollbar" style={{ maxWidth: 'calc(100% - 24px)' }}>{contributeData.subject || 'اختر المادة...'}</span>
+                                    <ChevronDown size={16} className={`transition-transform flex-shrink-0 ${showSubjectDropdown ? 'rotate-180' : ''}`} />
                                 </button>
                                 {showSubjectDropdown && (
                                     <div className="contribution-dropdown-menu custom-scrollbar">

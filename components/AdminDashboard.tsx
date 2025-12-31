@@ -341,10 +341,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
         const docRef = doc(db, "Dashboard", "Admin");
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setLectureTypes(docSnap.data().LectureTypes || []);
+          const types = docSnap.data().LectureTypes || [];
+
+          // If LectureTypes is empty, fallback to getting subjects from quizi collection
+          if (types.length === 0) {
+            try {
+              const quiziSnapshot = await getDocs(collection(db, "quizi"));
+              const subjects = quiziSnapshot.docs.map(doc => doc.id);
+              setLectureTypes(subjects.length > 0 ? subjects : ["مراسلات ومصطلحات اجنبية"]);
+            } catch (quiziError) {
+              console.error("Error fetching quizi subjects:", quiziError);
+              setLectureTypes(["مراسلات ومصطلحات اجنبية"]);
+            }
+          } else {
+            setLectureTypes(types);
+          }
+        } else {
+          // If document doesn't exist, try to get subjects from quizi collection
+          try {
+            const quiziSnapshot = await getDocs(collection(db, "quizi"));
+            const subjects = quiziSnapshot.docs.map(doc => doc.id);
+            setLectureTypes(subjects.length > 0 ? subjects : ["مراسلات ومصطلحات اجنبية"]);
+          } catch (quiziError) {
+            console.error("Error fetching quizi subjects:", quiziError);
+            setLectureTypes(["مراسلات ومصطلحات اجنبية"]);
+          }
         }
       } catch (error) {
         console.error("Error fetching lecture types:", error);
+        setLectureTypes(["مراسلات ومصطلحات اجنبية"]);
       }
     };
     fetchLectureTypes();
@@ -1260,7 +1285,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                             <div className="text-[10px] text-muted font-black tracking-widest uppercase">{pq.Number}</div>
                           </div>
                         </div>
-                        <div className="px-3 py-1 bg-white/5 rounded-full text-[10px] uppercase font-black text-primary border border-primary/20 tracking-tighter shadow-glow-sm">
+                        <div className="px-3 py-1 bg-white/5 rounded-full text-[10px] uppercase font-black text-primary border border-primary/20 tracking-tighter shadow-glow-sm overflow-x-auto max-w-[200px] whitespace-nowrap custom-scrollbar">
                           {pq.Quiz.Subject}
                         </div>
                       </div>
