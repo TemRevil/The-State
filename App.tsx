@@ -297,6 +297,18 @@ const App: React.FC = () => {
     const code = localStorage.getItem("Code");
     const name = localStorage.getItem("Name");
 
+    if (num) {
+      getDoc(doc(db, "Numbers", num)).then((docSnap) => {
+        if (!docSnap.exists()) {
+          console.log("User number not found in DB, logging out.");
+          localStorage.clear();
+          setCurrentView('login');
+        }
+      }).catch((err) => {
+        console.error("Error checking user status:", err);
+      });
+    }
+
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setIsAdmin(!!user);
       if (ENABLE_LIMITS && user) {
