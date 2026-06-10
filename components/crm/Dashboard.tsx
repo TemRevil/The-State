@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, PieChart, Pie,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid,
+  PieChart, Pie,
 } from 'recharts';
 import type { PieLabelRenderProps } from 'recharts';
-import { Phone, Mail, Calendar, CheckSquare } from 'lucide-react';
+import { Phone, Mail, Calendar, CheckSquare, CalendarCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { PageHeader, EmptyState, money } from '../../lib/ui';
@@ -19,6 +20,17 @@ const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   email: Mail,
   meeting: Calendar,
   task: CheckSquare,
+};
+
+// Apple HIG light-theme chart styling — soft ticks, hairline grid, clean
+// tooltip. (CSS vars don't resolve inside JS style objects, so use literals.)
+const AXIS_TICK = { fill: '#8e8e93', fontSize: 12 };
+const TOOLTIP_STYLE = {
+  background: '#fff',
+  border: '1px solid rgba(0,0,0,0.1)',
+  borderRadius: 12,
+  boxShadow: '0 8px 28px rgba(0,0,0,0.12)',
+  fontSize: 13,
 };
 
 interface StageDatum {
@@ -79,35 +91,40 @@ export default function Dashboard() {
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-label">Open Pipeline</div>
-          <div className="kpi-value">{money(openPipeline)}</div>
+          <div className="kpi-value tnum">{money(openPipeline)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Won Value</div>
-          <div className="kpi-value">{money(wonValue)}</div>
+          <div className="kpi-value tnum">{money(wonValue)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Win Rate</div>
-          <div className="kpi-value">{winRate}</div>
+          <div className="kpi-value tnum">{winRate}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Open Deals</div>
-          <div className="kpi-value">{openCount}</div>
+          <div className="kpi-value tnum">{openCount}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Contacts</div>
-          <div className="kpi-value">{contacts.length}</div>
+          <div className="kpi-value tnum">{contacts.length}</div>
         </div>
       </div>
 
       <div className="grid-2">
         <div className="card">
-          <h3>Value by stage</h3>
+          <div className="card-title">Value by stage</div>
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={byStage}>
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={(v: number) => money(v)} tick={{ fontSize: 12 }} width={80} />
-              <Tooltip formatter={(v: number) => money(v)} />
-              <Bar dataKey="value">
+            <BarChart data={byStage} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke="rgba(0,0,0,0.06)" />
+              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'rgba(0,0,0,0.1)' }} />
+              <YAxis tickFormatter={(v: number) => money(v)} tick={AXIS_TICK} tickLine={false} axisLine={false} width={80} />
+              <Tooltip
+                formatter={(v: number) => money(v)}
+                cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                contentStyle={TOOLTIP_STYLE}
+              />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {byStage.map((d) => (
                   <Cell key={d.stage} fill={STAGE_COLOR[d.stage]} />
                 ))}
@@ -117,10 +134,10 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h3>Deals by stage</h3>
+          <div className="card-title">Deals by stage</div>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Tooltip />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Pie
                 data={byStage}
                 dataKey="count"
@@ -128,6 +145,8 @@ export default function Dashboard() {
                 cx="50%"
                 cy="50%"
                 outerRadius={100}
+                stroke="#fff"
+                strokeWidth={2}
                 label={(entry: PieLabelRenderProps) => {
                   const d = entry.payload as StageDatum | undefined;
                   return d ? `${d.label}: ${d.count}` : '';
@@ -142,19 +161,23 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="card">
-        <h3>Upcoming activities</h3>
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">Upcoming activities</div>
         {upcoming.length === 0 ? (
-          <EmptyState>No open activities — you're all caught up.</EmptyState>
+          <EmptyState icon={<CalendarCheck size={26} strokeWidth={1.75} />}>
+            No open activities — you're all caught up.
+          </EmptyState>
         ) : (
           upcoming.map((a) => {
             const Icon = ACTIVITY_ICON[a.type];
             return (
               <div className="list-row" key={a.id}>
                 <span className="tag"><Icon size={14} /> {a.type}</span>
-                <span style={{ flex: 1 }}>{a.subject}</span>
-                <span className="muted">{contactName(a.contactId)}</span>
-                <span className="muted">{a.due}</span>
+                <div className="list-main">
+                  <div className="list-title">{a.subject}</div>
+                  <div className="list-sub">{contactName(a.contactId)}</div>
+                </div>
+                <span className="list-sub tnum">{a.due}</span>
               </div>
             );
           })

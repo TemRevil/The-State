@@ -1,7 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useStore } from '../../lib/store';
-import { Modal, Field, TextInput, Select, Button, PageHeader, money } from '../../lib/ui';
+import {
+  Modal,
+  Field,
+  TextInput,
+  Select,
+  DatePicker,
+  Button,
+  PageHeader,
+  money,
+  type Option,
+} from '../../lib/ui';
 import {
   type Deal,
   type Stage,
@@ -24,6 +34,8 @@ type Draft = {
   contactId: string;
   closeDate: string;
 };
+
+const STAGE_OPTIONS: Option[] = STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s] }));
 
 export default function Deals() {
   const store = useStore();
@@ -69,10 +81,10 @@ export default function Deals() {
           return (
             <div className="kanban-col" key={stage}>
               <div className="kanban-col-head">
-                <span style={{ color: STAGE_COLOR[stage] }}>{STAGE_LABEL[stage]}</span>
-                <span className="muted">
-                  {list.length} · {money(colValue)}
-                </span>
+                <span className="dot" style={{ background: STAGE_COLOR[stage] }} />
+                <span>{STAGE_LABEL[stage]}</span>
+                <span className="count">{list.length}</span>
+                <span className="sum tnum">{money(colValue)}</span>
               </div>
               {list.map((d) => (
                 <div
@@ -92,7 +104,7 @@ export default function Deals() {
                   <div className="deal-meta">
                     {companyName(d.companyId)} · {contactName(d.contactId)}
                   </div>
-                  <div className="deal-value">{money(d.value)}</div>
+                  <div className="deal-value tnum">{money(d.value)}</div>
                 </div>
               ))}
             </div>
@@ -151,6 +163,15 @@ function DealModal({
   const set = <K extends keyof Draft>(key: K, val: Draft[K]) =>
     setDraft((prev) => ({ ...prev, [key]: val }));
 
+  const companyOptions = useMemo<Option[]>(
+    () => companies.map((c) => ({ value: c.id, label: c.name })),
+    [companies],
+  );
+  const contactOptions = useMemo<Option[]>(
+    () => contacts.map((c) => ({ value: c.id, label: c.name })),
+    [contacts],
+  );
+
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -208,6 +229,7 @@ function DealModal({
       <Field label="Value (USD)">
         <TextInput
           type="number"
+          inputMode="decimal"
           min={0}
           value={draft.value}
           onChange={(e) => set('value', Number(e.target.value))}
@@ -215,50 +237,43 @@ function DealModal({
       </Field>
 
       <Field label="Stage">
-        <Select value={draft.stage} onChange={(e) => set('stage', e.target.value as Stage)}>
-          {STAGES.map((s) => (
-            <option key={s} value={s}>
-              {STAGE_LABEL[s]}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <Field label="Company">
-        <Select value={draft.companyId} onChange={(e) => set('companyId', e.target.value)}>
-          <option value="">—</option>
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <Field label="Contact">
-        <Select value={draft.contactId} onChange={(e) => set('contactId', e.target.value)}>
-          <option value="">—</option>
-          {contacts.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <Field label="Close date">
-        <TextInput
-          type="date"
-          value={draft.closeDate}
-          onChange={(e) => set('closeDate', e.target.value)}
+        <Select
+          value={draft.stage}
+          onChange={(v) => set('stage', v as Stage)}
+          options={STAGE_OPTIONS}
+          ariaLabel="Stage"
         />
       </Field>
 
-      {error && (
-        <div className="muted" style={{ color: '#ef4444', marginTop: 8 }}>
-          {error}
-        </div>
-      )}
+      <Field label="Company">
+        <Select
+          value={draft.companyId}
+          onChange={(v) => set('companyId', v)}
+          options={companyOptions}
+          placeholder="—"
+          ariaLabel="Company"
+        />
+      </Field>
+
+      <Field label="Contact">
+        <Select
+          value={draft.contactId}
+          onChange={(v) => set('contactId', v)}
+          options={contactOptions}
+          placeholder="—"
+          ariaLabel="Contact"
+        />
+      </Field>
+
+      <Field label="Close date">
+        <DatePicker
+          value={draft.closeDate}
+          onChange={(v) => set('closeDate', v)}
+          ariaLabel="Close date"
+        />
+      </Field>
+
+      {error && <div className="form-error">{error}</div>}
     </Modal>
   );
 }

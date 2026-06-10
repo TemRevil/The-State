@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { Modal, Field, TextInput, Select, Button, EmptyState, PageHeader } from '../../lib/ui';
 import type { Contact } from '../../types';
@@ -38,6 +38,15 @@ export default function Contacts() {
       companyName(c.companyId).toLowerCase().includes(q),
     );
   }, [contacts, query, companyName]);
+
+  // Company options for the custom Select; first entry clears the company.
+  const companyOptions = useMemo(
+    () => [
+      { value: '', label: '— No company —' },
+      ...companies.map((co) => ({ value: co.id, label: co.name })),
+    ],
+    [companies],
+  );
 
   const openCreate = () => {
     setEditing(null);
@@ -133,7 +142,7 @@ export default function Contacts() {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState>
+        <EmptyState icon={<Users size={28} strokeWidth={1.75} />}>
           {contacts.length === 0
             ? 'No contacts yet. Add your first one to get started.'
             : 'No contacts match your search.'}
@@ -155,7 +164,7 @@ export default function Contacts() {
             <tbody>
               {filtered.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.name}</td>
+                  <td className="cell-primary">{c.name}</td>
                   <td>{c.title || '—'}</td>
                   <td>{companyName(c.companyId)}</td>
                   <td>{c.email || '—'}</td>
@@ -212,12 +221,13 @@ export default function Contacts() {
               />
             </Field>
             <Field label="Company">
-              <Select value={draft.companyId} onChange={(e) => set('companyId', e.target.value)}>
-                <option value="">— No company —</option>
-                {companies.map((co) => (
-                  <option key={co.id} value={co.id}>{co.name}</option>
-                ))}
-              </Select>
+              <Select
+                value={draft.companyId}
+                onChange={(v) => set('companyId', v)}
+                options={companyOptions}
+                placeholder="— No company —"
+                ariaLabel="Company"
+              />
             </Field>
             <Field label="Email">
               <TextInput
@@ -241,7 +251,7 @@ export default function Contacts() {
                 placeholder="decision-maker, warm, west-coast"
               />
             </Field>
-            {error && <div className="login-error" style={{ marginTop: 8 }}>{error}</div>}
+            {error && <div className="form-error" style={{ marginTop: 8 }}>{error}</div>}
             <button type="submit" hidden />
           </form>
         </Modal>

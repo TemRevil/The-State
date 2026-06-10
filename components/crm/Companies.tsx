@@ -1,16 +1,23 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, ExternalLink } from 'lucide-react';
+import { Plus, Pencil, Trash2, ExternalLink, Building2 } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import { Modal, Field, TextInput, Select, Button, EmptyState, PageHeader } from '../../lib/ui';
+import type { Option } from '../../lib/ui';
 import type { Company } from '../../types';
 
 // ── Companies ──
 // A simple table of every company, with create / edit / delete in a modal.
 
-const SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'];
+const SIZE_OPTIONS: Option[] = [
+  { value: '1-10', label: '1–10' },
+  { value: '11-50', label: '11–50' },
+  { value: '51-200', label: '51–200' },
+  { value: '201-500', label: '201–500' },
+  { value: '500+', label: '500+' },
+];
 
 type Draft = Omit<Company, 'id' | 'createdAt'>;
-const emptyDraft = (): Draft => ({ name: '', industry: '', size: SIZES[0], website: '' });
+const emptyDraft = (): Draft => ({ name: '', industry: '', size: SIZE_OPTIONS[0].value, website: '' });
 
 // Normalise a website into a clickable absolute URL.
 function toHref(website: string): string {
@@ -106,10 +113,12 @@ export default function Companies() {
         action={<Button onClick={openCreate}><Plus size={16} /> New company</Button>}
       />
 
-      {error && !open && <div className="login-error" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && !open && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
 
       {companies.length === 0 ? (
-        <EmptyState>No companies yet. Add your first company to get started.</EmptyState>
+        <EmptyState icon={<Building2 size={28} strokeWidth={1.75} />}>
+          No companies yet. Add your first company to get started.
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="crm-table">
@@ -126,7 +135,7 @@ export default function Companies() {
             <tbody>
               {companies.map((company) => (
                 <tr key={company.id}>
-                  <td>{company.name}</td>
+                  <td className="cell-primary">{company.name}</td>
                   <td>{company.industry || <span className="muted">—</span>}</td>
                   <td>{company.size || <span className="muted">—</span>}</td>
                   <td>
@@ -138,7 +147,7 @@ export default function Companies() {
                       <span className="muted">—</span>
                     )}
                   </td>
-                  <td>{contactCounts[company.id] ?? 0}</td>
+                  <td><span className="tnum">{contactCounts[company.id] ?? 0}</span></td>
                   <td>
                     <div className="row-actions">
                       <button className="icon-btn" onClick={() => openEdit(company)} aria-label="Edit company">
@@ -184,11 +193,12 @@ export default function Companies() {
               />
             </Field>
             <Field label="Size">
-              <Select value={draft.size} onChange={(e) => update({ size: e.target.value })}>
-                {SIZES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </Select>
+              <Select
+                value={draft.size}
+                onChange={(v) => update({ size: v })}
+                options={SIZE_OPTIONS}
+                ariaLabel="Company size"
+              />
             </Field>
             <Field label="Website">
               <TextInput
@@ -198,7 +208,7 @@ export default function Companies() {
               />
             </Field>
 
-            {error && <div className="login-error" style={{ marginTop: 8 }}>{error}</div>}
+            {error && <div className="form-error" style={{ marginTop: 8 }}>{error}</div>}
 
             {/* Allow Enter-to-submit while keeping the visible buttons in the modal footer. */}
             <button type="submit" style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
