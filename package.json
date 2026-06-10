@@ -1,30 +1,28 @@
 {
-  "name": "the-state",
+  "name": "the-state-crm",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node ./node_modules/vite/bin/vite.js",
-    "build": "tsc && node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
-    "read-quizi": "node ./scripts/read_quizi.cjs"
+    "seed": "node ./scripts/seed.cjs"
   },
   "dependencies": {
     "firebase": "^10.14.1",
-    "firebase-admin": "^13.6.0",
     "lucide-react": "^0.378.0",
-    "pdfjs-dist": "^4.10.38",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "recharts": "^3.5.1",
-    "ua-parser-js": "^2.0.7"
+    "recharts": "^3.5.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
+    "firebase-admin": "^13.6.0",
     "gh-pages": "^5.0.0",
     "typescript": "^5.2.2",
     "vite": "^5.2.0"
