@@ -4,11 +4,14 @@
    soft material depth, tabular figures for data, 8pt spacing rhythm. */
 
 :root {
-  /* Backgrounds (Apple: systemBackground / grouped) */
-  --bg: #f2f2f7;
-  --surface: #ffffff;
-  --surface-2: #f7f7fa;
-  --elevated: #ffffff;
+  /* Backgrounds (Apple: systemBackground / grouped). Surfaces are translucent so
+     the ambient color behind them shows through the frosted-glass material. */
+  --bg: #eaecf2;
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-2: rgba(248, 249, 252, 0.55);
+  --elevated: rgba(255, 255, 255, 0.76);
+  --material: saturate(180%) blur(24px);
+  --material-strong: saturate(180%) blur(34px);
 
   /* Fills (Apple system fills — for tracks, inputs, chips) */
   --fill: rgba(120, 120, 128, 0.12);
@@ -55,10 +58,10 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --surface: #1c1c1e;
-    --surface-2: #2c2c2e;
-    --elevated: #2c2c2e;
+    --bg: #08080b;
+    --surface: rgba(28, 28, 30, 0.64);
+    --surface-2: rgba(44, 44, 46, 0.55);
+    --elevated: rgba(40, 40, 42, 0.78);
     --fill: rgba(120, 120, 128, 0.24);
     --fill-strong: rgba(120, 120, 128, 0.36);
     --fill-hover: rgba(120, 120, 128, 0.16);
@@ -93,6 +96,41 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* Ambient aurora — soft, blurred color blooms behind the frosted surfaces so the
+   glass has something to refract. Fixed (doesn't scroll), tasteful low opacity. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -10vmax;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(44vw 44vw at 6% -2%, rgba(10, 132, 255, 0.34), transparent 62%),
+    radial-gradient(42vw 42vw at 96% 0%, rgba(94, 92, 230, 0.3), transparent 62%),
+    radial-gradient(48vw 48vw at 92% 100%, rgba(48, 176, 199, 0.3), transparent 64%),
+    radial-gradient(40vw 40vw at 0% 100%, rgba(175, 82, 222, 0.24), transparent 62%),
+    radial-gradient(38vw 32vw at 52% 34%, rgba(88, 86, 214, 0.14), transparent 60%);
+  filter: blur(44px);
+}
+@media (prefers-color-scheme: dark) {
+  body::before {
+    background:
+      radial-gradient(40vw 40vw at 10% 4%, rgba(10, 132, 255, 0.28), transparent 60%),
+      radial-gradient(36vw 36vw at 90% -6%, rgba(94, 92, 230, 0.26), transparent 60%),
+      radial-gradient(42vw 42vw at 94% 98%, rgba(48, 176, 199, 0.22), transparent 62%),
+      radial-gradient(34vw 34vw at 2% 100%, rgba(175, 82, 222, 0.2), transparent 60%);
+    filter: blur(48px);
+  }
+}
+
+/* Frosted-glass material on chrome + floating surfaces (Apple vibrancy). */
+.sidebar, .topbar, .card, .kpi, .table-wrap, .list, .kanban-col,
+.modal-card, .popover, .login-card {
+  backdrop-filter: var(--material);
+  -webkit-backdrop-filter: var(--material);
+}
+.modal-card, .popover { backdrop-filter: var(--material-strong); -webkit-backdrop-filter: var(--material-strong); }
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
 .muted { color: var(--label-2); }
 .spin { animation: spin 0.9s linear infinite; }
@@ -242,7 +280,7 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; line-height
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
 .budget { font-size: 12px; color: var(--label-2); padding: 8px 12px; background: var(--fill); border-radius: var(--r-sm); text-align: center; }
 .content { display: flex; flex-direction: column; min-width: 0; }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 13px 32px; border-bottom: 1px solid var(--separator); font-size: 14px; color: var(--label-2); }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 13px 32px; border-bottom: 1px solid var(--separator); font-size: 14px; color: var(--label-2); background: var(--surface); position: sticky; top: 0; z-index: 40; }
 .view { padding: 28px 32px 56px; max-width: 1180px; width: 100%; }
 
 /* ── Page header ── */
@@ -273,12 +311,12 @@ table.crm-table { width: 100%; border-collapse: collapse; }
 
 /* ── Kanban ── */
 .kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(248px, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 10px; }
-.kanban-col { background: var(--bg); border: 1px solid var(--separator); border-radius: var(--r-lg); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 140px; }
+.kanban-col { background: var(--surface-2); border: 1px solid var(--separator); border-radius: var(--r-lg); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 140px; }
 .kanban-col-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; padding: 2px 6px; }
 .kanban-col-head .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .kanban-col-head .count { color: var(--label-2); font-weight: 510; }
 .kanban-col-head .sum { margin-left: auto; color: var(--label-2); font-size: 13px; font-weight: 510; }
-.deal-card { background: var(--surface); border: 1px solid var(--separator); border-radius: var(--r); padding: 13px; cursor: pointer; box-shadow: var(--shadow-1); transition: transform 0.12s var(--ease), box-shadow var(--dur); }
+.deal-card { background: var(--elevated); border: 1px solid var(--separator); border-radius: var(--r); padding: 13px; cursor: pointer; box-shadow: var(--shadow-1); transition: transform 0.12s var(--ease), box-shadow var(--dur); }
 .deal-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
 .deal-card:active { transform: translateY(0) scale(0.99); }
 .deal-card .deal-title { font-weight: 590; font-size: 15px; }
