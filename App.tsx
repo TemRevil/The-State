@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  LayoutDashboard, Kanban, Users, Building2, CheckSquare, LogOut, Loader2, ShieldCheck, RefreshCw,
+  LayoutDashboard, Kanban, Users, Building2, CheckSquare, LogOut, Loader2, ShieldCheck, RefreshCw, Sun, Moon,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './lib/auth';
 import { StoreProvider, useStore } from './lib/store';
@@ -14,6 +14,21 @@ import Activities from './components/crm/Activities';
 
 type View = 'dashboard' | 'deals' | 'contacts' | 'companies' | 'activities';
 
+// Light/dark toggle. The pre-paint script in index.html already set data-theme on
+// <html>; this reads it, flips it, and persists the choice.
+function useThemeToggle() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    () => (typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
+  );
+  const toggle = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch { /* ignore */ }
+  };
+  return { theme, toggle };
+}
+
 const NAV: { key: View; label: string; icon: React.ReactNode }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
   { key: 'deals', label: 'Deals', icon: <Kanban size={18} /> },
@@ -26,6 +41,7 @@ function Shell() {
   const { signOut, user } = useAuth();
   const { loading, error, refresh } = useStore();
   const [view, setView] = useState<View>('dashboard');
+  const { theme, toggle } = useThemeToggle();
 
   return (
     <div className="app-shell">
@@ -49,7 +65,12 @@ function Shell() {
       <main className="content">
         <div className="topbar">
           <span className="muted">Signed in as <strong>{user?.email}</strong></span>
-          <button className="icon-btn" onClick={refresh} title="Reload data" aria-label="Reload data"><RefreshCw size={16} /></button>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className="icon-btn" onClick={toggle} title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} aria-label="Toggle theme">
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <button className="icon-btn" onClick={refresh} title="Reload data" aria-label="Reload data"><RefreshCw size={16} /></button>
+          </div>
         </div>
 
         {loading ? (

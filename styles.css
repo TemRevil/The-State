@@ -12,6 +12,8 @@
   --elevated: rgba(255, 255, 255, 0.76);
   --material: saturate(180%) blur(24px);
   --material-strong: saturate(180%) blur(34px);
+  --scroll-thumb: rgba(60, 60, 67, 0.28);
+  --scroll-thumb-hover: rgba(60, 60, 67, 0.45);
 
   /* Fills (Apple system fills — for tracks, inputs, chips) */
   --fill: rgba(120, 120, 128, 0.12);
@@ -56,32 +58,35 @@
   --dur: 0.22s;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #08080b;
-    --surface: rgba(28, 28, 30, 0.64);
-    --surface-2: rgba(44, 44, 46, 0.55);
-    --elevated: rgba(40, 40, 42, 0.78);
-    --fill: rgba(120, 120, 128, 0.24);
-    --fill-strong: rgba(120, 120, 128, 0.36);
-    --fill-hover: rgba(120, 120, 128, 0.16);
-    --label: #ffffff;
-    --label-2: rgba(235, 235, 245, 0.6);
-    --label-3: rgba(235, 235, 245, 0.3);
-    --separator: rgba(84, 84, 88, 0.5);
-    --separator-opaque: #38383a;
-    --accent: #0a84ff;
-    --accent-press: #409cff;
-    --green: #30d158;
-    --red: #ff453a;
-    --orange: #ff9f0a;
-    --purple: #bf5af2;
-    --teal: #40c8e0;
-    --indigo: #5e5ce6;
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.5);
-    --shadow-pop: 0 12px 48px rgba(0, 0, 0, 0.6);
-  }
+/* Dark theme — applied via [data-theme="dark"] on <html>. A pre-paint script in
+   index.html resolves the stored preference (or the system setting on first visit)
+   and sets data-theme to a concrete 'light' or 'dark', so no media query is needed. */
+[data-theme='dark'] {
+  --bg: #08080b;
+  --surface: rgba(28, 28, 30, 0.64);
+  --surface-2: rgba(44, 44, 46, 0.55);
+  --elevated: rgba(40, 40, 42, 0.78);
+  --fill: rgba(120, 120, 128, 0.24);
+  --fill-strong: rgba(120, 120, 128, 0.36);
+  --fill-hover: rgba(120, 120, 128, 0.16);
+  --label: #ffffff;
+  --label-2: rgba(235, 235, 245, 0.6);
+  --label-3: rgba(235, 235, 245, 0.3);
+  --separator: rgba(84, 84, 88, 0.5);
+  --separator-opaque: #38383a;
+  --accent: #0a84ff;
+  --accent-press: #409cff;
+  --green: #30d158;
+  --red: #ff453a;
+  --orange: #ff9f0a;
+  --purple: #bf5af2;
+  --teal: #40c8e0;
+  --indigo: #5e5ce6;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 12px 48px rgba(0, 0, 0, 0.6);
+  --scroll-thumb: rgba(235, 235, 245, 0.3);
+  --scroll-thumb-hover: rgba(235, 235, 245, 0.5);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -112,17 +117,33 @@ body::before {
     radial-gradient(40vw 40vw at 0% 100%, rgba(175, 82, 222, 0.24), transparent 62%),
     radial-gradient(38vw 32vw at 52% 34%, rgba(88, 86, 214, 0.14), transparent 60%);
   filter: blur(44px);
+  animation: aurora-drift 28s ease-in-out infinite;
 }
-@media (prefers-color-scheme: dark) {
-  body::before {
-    background:
-      radial-gradient(40vw 40vw at 10% 4%, rgba(10, 132, 255, 0.28), transparent 60%),
-      radial-gradient(36vw 36vw at 90% -6%, rgba(94, 92, 230, 0.26), transparent 60%),
-      radial-gradient(42vw 42vw at 94% 98%, rgba(48, 176, 199, 0.22), transparent 62%),
-      radial-gradient(34vw 34vw at 2% 100%, rgba(175, 82, 222, 0.2), transparent 60%);
-    filter: blur(48px);
-  }
+[data-theme='dark'] body::before {
+  background:
+    radial-gradient(42vw 42vw at 8% 2%, rgba(10, 132, 255, 0.34), transparent 60%),
+    radial-gradient(38vw 38vw at 92% -4%, rgba(94, 92, 230, 0.32), transparent 60%),
+    radial-gradient(44vw 44vw at 94% 98%, rgba(48, 176, 199, 0.28), transparent 62%),
+    radial-gradient(36vw 36vw at 0% 100%, rgba(175, 82, 222, 0.26), transparent 60%);
+  filter: blur(52px);
 }
+@keyframes aurora-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(2%, 1.5%, 0) scale(1.06); }
+  66% { transform: translate3d(-1.5%, 1%, 0) scale(1.03); }
+}
+
+/* ── Custom scrollbars (thin, rounded, translucent — Apple overlay style) ── */
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb); border-radius: 999px;
+  border: 3px solid transparent; background-clip: padding-box;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* Frosted-glass material on chrome + floating surfaces (Apple vibrancy). */
 .sidebar, .topbar, .card, .kpi, .table-wrap, .list, .kanban-col,
@@ -273,10 +294,16 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; line-height
   border: none; background: transparent; color: var(--label); font: inherit; font-size: 15px; font-weight: 510;
   cursor: pointer; transition: background 0.14s var(--ease);
 }
-.nav-item svg { color: var(--label-2); transition: color 0.14s; }
+.nav-item svg { transition: color 0.14s, transform 0.16s var(--ease); }
+/* Per-section colored icons (Apple Settings-app style) */
+.sidebar nav .nav-item:nth-child(1) svg { color: var(--accent); }
+.sidebar nav .nav-item:nth-child(2) svg { color: var(--purple); }
+.sidebar nav .nav-item:nth-child(3) svg { color: var(--teal); }
+.sidebar nav .nav-item:nth-child(4) svg { color: var(--orange); }
+.sidebar nav .nav-item:nth-child(5) svg { color: var(--green); }
 .nav-item:hover { background: var(--fill); }
-.nav-item.active { background: var(--fill); color: var(--accent); font-weight: 590; }
-.nav-item.active svg { color: var(--accent); }
+.nav-item:hover svg { transform: scale(1.12); }
+.nav-item.active { background: var(--fill-strong); color: var(--label); font-weight: 650; }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
 .budget { font-size: 12px; color: var(--label-2); padding: 8px 12px; background: var(--fill); border-radius: var(--r-sm); text-align: center; }
 .content { display: flex; flex-direction: column; min-width: 0; }
@@ -295,6 +322,12 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; line-height
 .kpi { background: var(--surface); border: 1px solid var(--separator); border-radius: var(--r-lg); padding: 18px 20px; box-shadow: var(--shadow-1); }
 .kpi .kpi-label { font-size: 13px; color: var(--label-2); font-weight: 510; }
 .kpi .kpi-value { font-size: 30px; font-weight: 680; letter-spacing: -0.03em; margin-top: 8px; }
+/* Colored KPI figures */
+.kpi-grid .kpi:nth-child(1) .kpi-value { color: var(--accent); }
+.kpi-grid .kpi:nth-child(2) .kpi-value { color: var(--green); }
+.kpi-grid .kpi:nth-child(3) .kpi-value { color: var(--purple); }
+.kpi-grid .kpi:nth-child(4) .kpi-value { color: var(--orange); }
+.kpi-grid .kpi:nth-child(5) .kpi-value { color: var(--teal); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 920px) { .grid-2 { grid-template-columns: 1fr; } }
 
@@ -357,6 +390,26 @@ table.crm-table { width: 100%; border-collapse: collapse; }
 .demo-hint { margin-top: 22px; padding: 14px; border-radius: var(--r); background: var(--fill); display: flex; flex-direction: column; gap: 4px; text-align: center; font-size: 13px; color: var(--label-2); }
 .demo-hint strong { color: var(--label); font-size: 13px; }
 .demo-hint code { font-family: 'SF Mono', ui-monospace, monospace; background: var(--surface); padding: 1px 6px; border-radius: 6px; color: var(--label); }
+
+/* ── Entrance motion ── (re-plays whenever a view mounts; views unmount on switch) */
+@keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.page-header { animation: rise-in 0.45s var(--ease) both; }
+.kpi { animation: rise-in 0.5s var(--ease) both; }
+.kpi-grid .kpi:nth-child(2) { animation-delay: 0.05s; }
+.kpi-grid .kpi:nth-child(3) { animation-delay: 0.1s; }
+.kpi-grid .kpi:nth-child(4) { animation-delay: 0.15s; }
+.kpi-grid .kpi:nth-child(5) { animation-delay: 0.2s; }
+.card { animation: rise-in 0.5s var(--ease) both; animation-delay: 0.08s; }
+.grid-2 > .card:nth-child(2) { animation-delay: 0.16s; }
+.table-wrap, .list { animation: rise-in 0.5s var(--ease) both; animation-delay: 0.06s; }
+.kanban-col { animation: rise-in 0.45s var(--ease) both; }
+.kanban-col:nth-child(2) { animation-delay: 0.05s; }
+.kanban-col:nth-child(3) { animation-delay: 0.1s; }
+.kanban-col:nth-child(4) { animation-delay: 0.15s; }
+.kanban-col:nth-child(5) { animation-delay: 0.2s; }
+.kanban-col:nth-child(6) { animation-delay: 0.25s; }
+.deal-card { animation: rise-in 0.4s var(--ease) both; }
+.list-row { animation: rise-in 0.4s var(--ease) both; }
 
 /* ── Responsive ── */
 @media (max-width: 760px) {
