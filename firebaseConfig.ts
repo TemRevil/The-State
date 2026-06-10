@@ -7,7 +7,7 @@ import { getFirestore } from 'firebase/firestore';
 // Firestore security rules + Auth. No Storage/Functions — the CRM runs entirely
 // on Firestore + Auth to stay within the Spark (free) plan.
 export const firebaseConfig = {
-  apiKey: "AIzaSyCPg-DCTI8xn4oSWrr0D8teFV79vpBkcts",
+  apiKey: "AIzaSyCA9CA5YAR4Xq5YekeBqpXqIShb_hOK5o0",
   authDomain: "state-a1.firebaseapp.com",
   projectId: "state-a1",
   storageBucket: "state-a1.firebasestorage.app",
