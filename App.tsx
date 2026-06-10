@@ -30,11 +30,11 @@ function useThemeToggle() {
 }
 
 const NAV: { key: View; label: string; icon: React.ReactNode }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-  { key: 'deals', label: 'Deals', icon: <Kanban size={18} /> },
-  { key: 'contacts', label: 'Contacts', icon: <Users size={18} /> },
-  { key: 'companies', label: 'Companies', icon: <Building2 size={18} /> },
-  { key: 'activities', label: 'Activities', icon: <CheckSquare size={18} /> },
+  { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+  { key: 'deals', label: 'Deals', icon: <Kanban size={16} /> },
+  { key: 'contacts', label: 'Contacts', icon: <Users size={16} /> },
+  { key: 'companies', label: 'Companies', icon: <Building2 size={16} /> },
+  { key: 'activities', label: 'Activities', icon: <CheckSquare size={16} /> },
 ];
 
 function Shell() {
@@ -44,35 +44,27 @@ function Shell() {
   const { theme, toggle } = useThemeToggle();
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><ShieldCheck size={22} /> <span>The State CRM</span></div>
-        <nav>
+    <div className="app">
+      <header className="topnav">
+        <div className="topnav-brand"><ShieldCheck size={20} /> <span>The State</span></div>
+        <nav className="tabs" aria-label="Sections">
           {NAV.map((n) => (
-            <button key={n.key} className={`nav-item ${view === n.key ? 'active' : ''}`} onClick={() => setView(n.key)}>
-              {n.icon} <span>{n.label}</span>
+            <button key={n.key} className={`tab ${view === n.key ? 'active' : ''}`} onClick={() => setView(n.key)} aria-current={view === n.key}>
+              {n.icon}<span>{n.label}</span>
             </button>
           ))}
         </nav>
-        <div className="sidebar-foot">
-          <div className="budget" title="Daily demo write budget (keeps the demo on Firebase's free tier)">
-            {writesUsedToday()} / {DAILY_BUDGET} writes today
-          </div>
-          <button className="nav-item" onClick={signOut}><LogOut size={18} /> <span>Sign out</span></button>
+        <div className="topnav-actions">
+          <span className="budget-pill tnum" title="Daily demo write budget (keeps the demo on Firebase's free tier)">{writesUsedToday()} / {DAILY_BUDGET}</span>
+          <button className="icon-btn" onClick={toggle} title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} aria-label="Toggle theme">
+            {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+          <button className="icon-btn" onClick={refresh} title="Reload data" aria-label="Reload data"><RefreshCw size={16} /></button>
+          <button className="icon-btn" onClick={signOut} title={`Sign out — ${user?.email ?? ''}`} aria-label="Sign out"><LogOut size={17} /></button>
         </div>
-      </aside>
+      </header>
 
-      <main className="content">
-        <div className="topbar">
-          <span className="muted">Signed in as <strong>{user?.email}</strong></span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button className="icon-btn" onClick={toggle} title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} aria-label="Toggle theme">
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            <button className="icon-btn" onClick={refresh} title="Reload data" aria-label="Reload data"><RefreshCw size={16} /></button>
-          </div>
-        </div>
-
+      <main className="page">
         {loading ? (
           <div className="center-fill"><Loader2 className="spin" size={28} /></div>
         ) : error ? (
