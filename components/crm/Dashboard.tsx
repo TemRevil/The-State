@@ -22,16 +22,22 @@ const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   task: CheckSquare,
 };
 
-// Apple HIG light-theme chart styling — soft ticks, hairline grid, clean
-// tooltip. (CSS vars don't resolve inside JS style objects, so use literals.)
+// Chart styling. Axis/grid use theme-neutral grays (they become SVG attributes,
+// which don't resolve CSS vars). The tooltip IS an HTML div, so CSS vars + a
+// backdrop blur DO apply — giving a frosted, theme-aware (dark in dark mode) card.
 const AXIS_TICK = { fill: '#8e8e93', fontSize: 12 };
+const GRID = 'rgba(142,142,147,0.18)';
 const TOOLTIP_STYLE = {
-  background: '#fff',
-  border: '1px solid rgba(0,0,0,0.1)',
+  background: 'var(--elevated)',
+  border: '1px solid var(--separator)',
   borderRadius: 12,
-  boxShadow: '0 8px 28px rgba(0,0,0,0.12)',
+  boxShadow: 'var(--shadow-pop)',
+  color: 'var(--label)',
   fontSize: 13,
+  backdropFilter: 'saturate(180%) blur(20px)',
+  WebkitBackdropFilter: 'saturate(180%) blur(20px)',
 };
+const TOOLTIP_TEXT = { color: 'var(--label)' };
 
 interface StageDatum {
   stage: Stage;
@@ -116,13 +122,15 @@ export default function Dashboard() {
           <div className="card-title">Value by stage</div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={byStage} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <CartesianGrid vertical={false} stroke="rgba(0,0,0,0.06)" />
-              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'rgba(0,0,0,0.1)' }} />
+              <CartesianGrid vertical={false} stroke={GRID} />
+              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: GRID }} />
               <YAxis tickFormatter={(v: number) => money(v)} tick={AXIS_TICK} tickLine={false} axisLine={false} width={80} />
               <Tooltip
                 formatter={(v: number) => money(v)}
-                cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                cursor={{ fill: 'rgba(142,142,147,0.12)' }}
                 contentStyle={TOOLTIP_STYLE}
+                labelStyle={TOOLTIP_TEXT}
+                itemStyle={TOOLTIP_TEXT}
               />
               <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {byStage.map((d) => (
@@ -137,7 +145,7 @@ export default function Dashboard() {
           <div className="card-title">Deals by stage</div>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_TEXT} itemStyle={TOOLTIP_TEXT} />
               <Pie
                 data={byStage}
                 dataKey="count"
@@ -145,8 +153,8 @@ export default function Dashboard() {
                 cx="50%"
                 cy="50%"
                 outerRadius={100}
-                stroke="#fff"
-                strokeWidth={2}
+                stroke="rgba(142,142,147,0.35)"
+                strokeWidth={1.5}
                 label={(entry: PieLabelRenderProps) => {
                   const d = entry.payload as StageDatum | undefined;
                   return d ? `${d.label}: ${d.count}` : '';
